@@ -1,0 +1,51 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- Virtual env ---
+venv/
+.venv/
+env/
+
+# --- ผลสแกน (generated — ไม่ต้อง commit) ---
+results/
+*.report.jsonl
+*.hitlog.jsonl
+promptmap2_scan_*.json
+garak_scan_*
+scan_summary_*.csv
+
+# --- promptmap2 (external tool — git clone เอง ไม่ใช่ส่วนหนึ่งของ repo นี้) ---
+promptmap/
+
+# --- system prompt ที่ auto-generate ตอนไม่มีไฟล์จริง (ดู promptmap2_runner.py) ---
+system-prompt.txt
+
+# --- garak's own cache/run dir (ถ้าถูกสร้างในเครื่อง ไม่ใช่ report_prefix ที่เรากำหนดเอง) ---
+.local/share/garak/
+garak_runs/
+
+# --- Secrets / env ---
+.env
+.env.*
+*.key
+
+# --- Docker ---
+*.log
+
+# --- Streamlit ---
+.streamlit/secrets.toml
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS ---
+.DS_Store
+Thumbs.db

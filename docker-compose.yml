@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    # สำคัญ: ถ้า Ollama รันบนเครื่อง host (นอก container) ต้องให้ backend
+    # เข้าถึงได้ผ่าน host.docker.internal แทน localhost — ดู README
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # mount results/ ออกมานอก container — เดิมไม่มีเลย ผลสแกน (report.html/.json/.csv
+    # + ไฟล์ดิบของแต่ละ tool ที่เซฟลง results/<scan_id>/) จะหายทุกครั้งที่ container
+    # restart/rebuild และ scan_id ที่ API คืนกลับมาก็ไร้ประโยชน์เพราะ host เข้าไม่ถึง
+    # ไฟล์จริงเลย — path ฝั่ง container คือ /app/core/results (core/results สัมพัทธ์กับ
+    # runners ไม่ใช่ /app/results เพราะ RESULTS_DIR คำนวณจาก __file__ ของ runner เอง)
+    volumes:
+      - ./results:/app/core/results
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    depends_on:
+      - backend
+    # เดิมมี extra_hosts นี้ตั้งไว้แค่ที่ service backend เท่านั้น แต่ ui/app.py
+    # (รันอยู่ใน container นี้) ก็ยิง request ไปหา Ollama โดยตรงเองเพื่อดึงรายชื่อ
+    # โมเดลมาทำ dropdown (GET {ollama_url}/api/tags) — ถ้าไม่มี extra_hosts ตรงนี้
+    # host.docker.internal จะ resolve ไม่ได้ใน container นี้เลย ทำให้ dropdown ไม่ขึ้น
+    # แม้ user จะแก้ Ollama Base URL เป็น host.docker.internal ถูกต้องแล้วตาม README
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
