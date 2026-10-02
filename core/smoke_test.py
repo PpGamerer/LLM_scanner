@@ -6,6 +6,7 @@ import time
 
 from .runners.garak_runner import run_garak_scan
 from .runners.promptmap2_runner import run_promptmap2_scan
+from .runners.promptfoo_runner import run_promptfoo_scan
 
 
 def smoke_test_garak(model_name: str, timeout_sec: int | None = None) -> dict:
@@ -101,6 +102,66 @@ def smoke_test_promptmap2(
     }
 
 
+def smoke_test_promptfoo(
+    model_name: str,
+    ollama_url: str = "http://localhost:11434",
+    timeout_sec: int | None = None,
+) -> dict:
+    """ยิง promptfoo จริง 1 plugin (harmful:hate) 1 test เพื่อเช็ค pipeline เร็วที่สุด
+    ไม่ใช้ plugin 'prompt-extraction' ตอน smoke test เพราะต้องมี system prompt กำกับ
+    ด้วย (จะเพิ่มความซับซ้อนของ smoke test เกินจำเป็น) — เลือก harmful:hate เพราะ
+    เป็น plugin เดี่ยวจริงที่ไม่ต้องมี config เสริมอะไรเลย เหมือน probe 'test.Blank' ของ
+    garak ที่เลือกไว้เพราะ "แทบไม่ทำอะไรเลย" ไม่ใช่เพราะตรง category ไหนเป็นพิเศษ
+
+    ⚠️ (2026-09) เดิมใช้ owasp:llm:01 แต่พบว่าเป็น alias ที่ promptfoo ขยายเป็น
+    28 sub-plugin (harmful:* ทุกหมวด + ascii-smuggling + prompt-extraction) แล้วยัง
+    โดน default strategies (jailbreak ฯลฯ) คูณเข้าไปอีกชั้น รวมออกมา 232 tests จริง
+    ไม่ใช่ 1 test อย่างที่ตั้งใจ — เปลี่ยนมาใช้ plugin เดี่ยว harmful:hate แทน (ดู
+    _build_config ใน promptfoo_runner.py ที่เพิ่ม "strategies": [] แก้อีกชั้นด้วย)
+    """
+    start = time.monotonic()
+    try:
+        rows = run_promptfoo_scan(
+            model_name=model_name,
+            plugins=["harmful:hate"],
+            ollama_url=ollama_url,
+            num_tests=1,
+            timeout_sec=timeout_sec,
+        )
+    except Exception as exc:
+        return {
+            "check": "promptfoo_smoke_scan",
+            "ok": False,
+            "detail": f"รัน promptfoo จริงไม่สำเร็จ: {exc}",
+            "rows": [],
+        }
+
+    elapsed = time.monotonic() - start
+
+    if not rows:
+        return {
+            "check": "promptfoo_smoke_scan",
+            "ok": False,
+            "detail": (
+                f"promptfoo subprocess รันจบใน {elapsed:.0f}s (ไม่ error) "
+                "แต่ parse ผลลัพธ์ออกมาไม่ได้เลยสักแถว — เช็ค promptfoo_parser.py "
+                "(อาจเป็นเพราะ schema ของ output json ไม่ตรงกับที่สมมติไว้ ดู comment "
+                "ใน _extract_results)"
+            ),
+            "rows": [],
+        }
+
+    return {
+        "check": "promptfoo_smoke_scan",
+        "ok": True,
+        "detail": (
+            f"promptfoo รันจริงสำเร็จใน {elapsed:.0f}s ได้ {len(rows)} แถวผลลัพธ์ "
+            "(plugin: harmful:hate)"
+        ),
+        "rows": rows,
+    }
+
+
 def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[dict]:
     if target_config.get("type") != "ollama":
         return [{
@@ -110,18 +171,21 @@ def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[
             "rows": [],
         }]
 
-    tools = tools or ["garak", "promptmap2"]
+    tools = tools or ["garak", "promptmap2", "promptfoo"]
     model_name = target_config["model"]
     results = []
 
     if "garak" in tools:
+        print(">>> เริ่ม garak smoke test", flush=True)
         results.append(smoke_test_garak(model_name))
+        print(">>> garak เสร็จแล้ว", flush=True)
 
     if "promptmap2" in tools:
         # ใช้ or เพื่อป้องกัน NoneType fallback fail
         ollama_url = target_config.get("base_url") or "http://localhost:11434"
         sys_path = target_config.get("system_prompt_path") or "system-prompt.txt"
-        
+
+        print(">>> เริ่ม promptmap2 smoke test", flush=True)
         results.append(smoke_test_promptmap2(
             model_name=model_name,
             ollama_url=ollama_url,
@@ -129,6 +193,16 @@ def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[
             controller_model=target_config.get("controller_model"),
             controller_model_type=target_config.get("controller_model_type"),
         ))
+        print(">>> promptmap2 เสร็จแล้ว", flush=True)
+
+    if "promptfoo" in tools:
+        ollama_url = target_config.get("base_url") or "http://localhost:11434"
+        print(">>> เริ่ม promptfoo smoke test", flush=True)
+        results.append(smoke_test_promptfoo(
+            model_name=model_name,
+            ollama_url=ollama_url,
+        ))
+        print(">>> promptfoo เสร็จแล้ว", flush=True)
 
     return results
 
@@ -143,7 +217,7 @@ if __name__ == "__main__":
     # ตั้งค่า target config ให้ตรงกับโมเดลที่ใช้รัน (เช่น llama3.2:1b หรือ dolphin3)
     target_config = {
         "type": "ollama",
-        "model": "llama3.2:1b", 
+        "model": "llama3.2:1b",
         "base_url": "http://localhost:11434"
     }
 
@@ -168,8 +242,9 @@ if __name__ == "__main__":
         mock_api_report = {
             "summary": summary,
             "tool_plan": {
-                "garak": ["LLM01", "LLM06", "LLM09"], 
-                "promptmap2": ["LLM07"]
+                "garak": ["LLM01", "LLM02", "LLM09"],
+                "promptmap2": ["LLM07"],
+                "promptfoo": ["LLM01", "LLM02", "LLM06", "LLM07", "LLM09"],
             },
             "raw_count": len(all_raw_rows),
             "raw_sample_first_2_rows": all_raw_rows[:2]  # โชว์โครงสร้าง raw data เป็นตัวอย่าง

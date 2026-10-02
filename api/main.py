@@ -30,9 +30,17 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
-from core.selector import run_scan, summarize_by_owasp, SUPPORTED_OWASP_CATEGORIES
+from core.selector import (
+    run_scan,
+    summarize_by_owasp,
+    SUPPORTED_OWASP_CATEGORIES,
+    RESULTS_DIR,
+    CATEGORY_CAPABLE_TOOLS,
+    CATEGORY_DEFAULT_TOOL,
+)
 from core.owasp_mapping import OWASP_CATEGORIES
 from core.smoke_test import run_smoke_test, smoke_test_passed
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="LLM Security Scanner API")
 
@@ -57,6 +65,11 @@ class ScanRequest(BaseModel):
     target: TargetConfig
     owasp_categories: list[str] | None = None  # เช่น ["LLM01", "LLM07"] — None = ทุก category ที่รองรับ
     depth: str = "deep"  # "quick" (เร็ว ครอบคลุมน้อยกว่า) | "deep" (ค่าเริ่มต้น — ครอบคลุมเต็ม)
+    # เช่น {"LLM07": "garak"} — บังคับหมวดนั้นให้ใช้ tool อื่นแทน default ของ
+    # CATEGORY_DEFAULT_TOOL ใน core/selector.py หมวดที่ไม่ได้ระบุใช้ default ตามปกติ
+    # ค่าที่ไม่ใช่ตัวเลือกที่หมวดนั้นรองรับจะถูกเมินเงียบๆ (แค่ print คำเตือนที่ backend
+    # log) ไม่ทำให้ scan ทั้งก้อน error — ดู selector.resolve_tool_plan()
+    tool_overrides: dict[str, str] | None = None
 
 
 class SmokeTestRequest(BaseModel):
@@ -64,10 +77,21 @@ class SmokeTestRequest(BaseModel):
     tools: list[str] | None = None  # เช่น ["garak"] ถ้าอยากทดสอบแค่ tool เดียว — None = ทุก tool ที่มี
 
 
-def _execute_scan(job_id: str, target_config: dict, owasp_categories: list[str] | None, depth: str):
+def _execute_scan(
+    job_id: str,
+    target_config: dict,
+    owasp_categories: list[str] | None,
+    depth: str,
+    tool_overrides: dict[str, str] | None,
+):
     JOBS[job_id]["status"] = "running"
     try:
-        rows, tool_plan, scan_id = run_scan(target_config, owasp_categories=owasp_categories, depth=depth)
+        rows, tool_plan, scan_id = run_scan(
+            target_config,
+            owasp_categories=owasp_categories,
+            depth=depth,
+            tool_overrides=tool_overrides,
+        )
         summary = summarize_by_owasp(rows)
         JOBS[job_id]["status"] = "done"
         # scan_id = ชื่อโฟลเดอร์ results/<scan_id>/ ที่มี report.html/.json/.csv +
@@ -101,8 +125,21 @@ def _execute_smoke_test(job_id: str, target_config: dict, tools: list[str] | Non
 
 @app.get("/owasp_categories")
 def list_owasp_categories():
-    """ให้ frontend ดึงรายชื่อ category ที่เลือกได้ (พร้อมชื่อเต็ม) มาแสดงเป็น checkbox"""
-    return {code: OWASP_CATEGORIES[code] for code in SUPPORTED_OWASP_CATEGORIES}
+    """ให้ frontend ดึงรายชื่อ category + tool ที่เลือกได้ต่อหมวด มาแสดงเป็น
+    checkbox + dropdown เลือก tool (เฉพาะหมวดที่มีมากกว่า 1 ตัวเลือก)
+
+    ⚠️ BREAKING CHANGE: เดิม endpoint นี้คืน {code: label} แบบ flat string —
+    ui/app.py แก้ตามแล้ว (คาดหวัง {code: {"label","tools","default_tool"}})
+    ถ้ามี client อื่นเรียก endpoint นี้อยู่ ต้องอัปเดตตามด้วย
+    """
+    return {
+        code: {
+            "label": OWASP_CATEGORIES[code],
+            "tools": CATEGORY_CAPABLE_TOOLS.get(code, []),
+            "default_tool": CATEGORY_DEFAULT_TOOL.get(code),
+        }
+        for code in SUPPORTED_OWASP_CATEGORIES
+    }
 
 
 @app.post("/scan")
@@ -116,7 +153,7 @@ def start_scan(req: ScanRequest, background_tasks: BackgroundTasks):
     }
     # หมายเหตุ: ไม่เก็บ api_key ไว้ใน JOBS dict ถาวร — ส่งแค่ตอน execute แล้วปล่อยผ่าน
     background_tasks.add_task(
-        _execute_scan, job_id, req.target.model_dump(), req.owasp_categories, req.depth
+        _execute_scan, job_id, req.target.model_dump(), req.owasp_categories, req.depth, req.tool_overrides
     )
     return {"job_id": job_id, "status": "queued"}
 
@@ -170,6 +207,16 @@ def get_smoke_test_status(job_id: str):
         "result": job.get("result"),
     }
 
+@app.get("/scan/{job_id}/report/html")
+def get_report_html_file(job_id: str):
+    job = JOBS.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(status_code=404, detail="ไม่พบ report หรือยังไม่เสร็จ")
+    scan_id = job["result"]["scan_id"]
+    html_path = RESULTS_DIR / scan_id / "report.html"
+    if not html_path.exists():
+        raise HTTPException(status_code=404, detail="ไม่พบไฟล์ report.html บน backend")
+    return FileResponse(html_path, media_type="text/html")
 
 @app.get("/health")
 def health():

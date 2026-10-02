@@ -1,117 +1,201 @@
 """
 selector.py — Decision logic: "ทดสอบอันนี้ ควรใช้ tool ไหน"
 
-นี่คือส่วนที่เป็น IP ของทีมเอง — โปรแกรมเลือก tool ให้เองตาม OWASP category
-ที่ผู้ใช้ต้องการทดสอบ ไม่ใช่ให้ผู้ใช้เลือก tool ตรงๆ (user ไม่จำเป็นต้องรู้จัก
-Garak/promptmap2/Giskard/PyRIT เลยด้วยซ้ำ)
+2026-09 (รอบเจ็ด): เปลี่ยน CATEGORY_TOOL_MAP (list ของ tool ที่ "รันพร้อมกันเสมอ")
+เป็น 2 dict แยกกัน:
+    CATEGORY_CAPABLE_TOOLS — tool ไหน "ทำหมวดนี้ได้บ้าง" (verify แล้วจากการเทียบ
+    probe/plugin/rule ของแต่ละ tool กับ OWASP category — ดู owasp_mapping.py)
+    CATEGORY_DEFAULT_TOOL  — ถ้า user ไม่ได้เลือกเอง ใช้ตัวไหนเป็นค่าเริ่มต้น
 
-ตอนนี้ implement จริงแค่ Garak + promptmap2 (target type "ollama")
-ส่วน Giskard/PyRIT ใส่ไว้เป็นโครงให้เห็นจุดที่ต้องเติมทีหลัง (ดู TODO)
+promptmap2 หายไปจาก CATEGORY_TOOL_MAP เดิมโดยไม่มีใครตั้งใจ — รอบนี้ใส่กลับเข้า
+CATEGORY_CAPABLE_TOOLS["LLM07"] ให้เป็นตัวเลือกที่ 3 คู่กับ garak/promptfoo
+(ไม่ได้ตั้งเป็น default เปลี่ยนจากเดิม ยังใช้ promptfoo เป็น default LLM07 เหมือนเดิม)
+
+2026-10 (รอบสิบเอ็ด): แก้บั๊ก dual-category ที่เจอตอน verify owasp_mapping.py รอบ 10 —
+garak_probes_for_owasp() ถูกแก้ให้ "เลือกรัน" probe อย่าง web_injection/exploitation/
+divergence.Repeat เข้า category รองด้วยแล้ว (เช่น web_injection ถูกรันตอนขอ LLM02
+ทั้งที่ primary category ของมันคือ LLM05) แต่ตอน filter ผลลัพธ์สุดท้ายเดิมเช็คแค่
+`r["owasp_category"] in categories` ซึ่ง owasp_category ที่ parser ใส่มาเป็น primary
+เดียวเสมอ (LLM05) — ทำให้ผลของ web_injection/exploitation ที่ควรนับเป็น LLM02 ด้วย
+โดนกรองทิ้งเงียบๆ ทุกครั้งที่ user ขอ category รอง (เจอกับ divergence.Repeat/LLM10
+มาก่อนแล้วเหมือนกัน เพิ่งมาสังเกตว่าเป็น pattern เดียวกัน)
+
+แก้โดยเพิ่ม `_expand_dual_category_garak_rows()`: หา category ที่ "ตรงกับที่ user ขอ
+จริง" ของแต่ละแถวผล garak (อาจมากกว่า 1 ถ้า user ขอ category คู่พร้อมกัน) แล้ว
+duplicate แถวเป็นหลายแถวเท่าจำนวน category ที่ match — pass/total ของ probe เดียวกัน
+จะถูกนับใน summary ของทุก category ที่ user เลือกและ probe นั้นตรง concept ด้วยจริง
+(ใช้ owasp_mapping.garak_probe_categories() เป็นแหล่งความจริงเดียวกับฝั่งเลือกรัน
+ไม่ใช่เดาเอง) เฉพาะผลจาก tool=="garak" เท่านั้นที่ผ่านฟังก์ชันนี้ — promptmap2/
+promptfoo ยังกรองด้วย owasp_category ตรงๆ แบบเดิม (ไม่มีปัญหา dual-category นี้)
 """
 
+import os
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 from .runners.garak_runner import run_garak_scan, RESULTS_DIR
 from .runners.promptmap2_runner import run_promptmap2_scan
-from .owasp_mapping import garak_probes_for_owasp, promptmap2_rule_types_for_owasp, OWASP_CATEGORIES
+from .runners.promptfoo_runner import run_promptfoo_scan
+from .owasp_mapping import (
+    garak_probes_for_owasp,
+    garak_probe_categories,
+    promptmap2_rule_types_for_owasp,
+    promptfoo_plugins_for_owasp,
+    OWASP_CATEGORIES,
+)
 from .report import save_reports
 
-# Decision table: OWASP category -> tool ที่เหมาะสุด
-# อ้างอิงจากตาราง pros/cons ที่ทำไว้ (Garak=baseline กว้าง, Giskard=RAG,
-# PyRIT=multi-turn, promptmap2=เจาะจง prompt stealing)
-# ค่าเป็น list ได้ ถ้า category นั้นอยากให้มากกว่า 1 tool ยืนยันผลร่วมกัน
-CATEGORY_TOOL_MAP = {
-    "LLM01": ["garak"],        # Prompt Injection -> Garak (coverage กว้างสุด)
-    "LLM06": ["garak"],        # Sensitive Info -> Garak (leakreplay probe)
-    "LLM07": ["promptmap2"],   # System Prompt Leakage -> promptmap2 (เจาะจงกว่า Garak's latentinjection)
-    "LLM09": ["garak"],        # Misinformation -> Garak
-    # "LLM08": ["pyrit"],       # TODO: Excessive Agency / multi-turn -> PyRIT (ยังไม่ implement runner)
+# tool ไหน "ทำได้" บ้างในแต่ละหมวด — verify แล้วว่ามี probe/plugin/rule ที่ active
+# จริงรองรับ concept ของหมวดนั้น (ไม่ใช่แค่มี tag ลอยๆ) ลำดับใน list ไม่มีความหมาย
+# พิเศษ (ไม่ใช่ลำดับความสำคัญ) — เอาไว้ให้ UI/API โชว์เป็นตัวเลือกเฉยๆ
+CATEGORY_CAPABLE_TOOLS = {
+    "LLM01": ["garak", "promptfoo"],
+    "LLM02": ["garak", "promptfoo"],
+    # LLM05 เพิ่ม 2026-09 (รอบเก้า) — garak เท่านั้น (web_injection, exploitation —
+    # ดู owasp_mapping.py) Promptfoo ฝั่งนี้ต้องเขียน custom assertion เอง ไม่ใช่
+    # plugin สำเร็จรูปเหมือนหมวดอื่น เลยยังไม่มี runner รองรับใน codebase นี้
+    "LLM05": ["garak"],
+    "LLM06": ["promptfoo"],              # garak ยังไม่มี probe active ตรง concept นี้
+    "LLM07": ["promptmap2", "garak", "promptfoo"],
+    "LLM09": ["garak", "promptfoo"],
+    "LLM10": ["garak", "promptfoo"],
 }
 
-SUPPORTED_OWASP_CATEGORIES = list(CATEGORY_TOOL_MAP.keys())
+# ตัวที่เลือกให้อัตโนมัติถ้า user ไม่ได้สั่งผ่าน tool_overrides
+CATEGORY_DEFAULT_TOOL = {
+    "LLM01": "garak",
+    "LLM02": "garak",
+    "LLM05": "garak",   # ตัวเดียวที่ทำได้ตอนนี้ (ดู CATEGORY_CAPABLE_TOOLS ด้านบน)
+    "LLM06": "promptfoo",
+    "LLM07": "promptfoo",
+    "LLM09": "garak",
+    "LLM10": "promptfoo",
+}
+
+SUPPORTED_OWASP_CATEGORIES = list(CATEGORY_CAPABLE_TOOLS.keys())
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+    return value if value >= 1 else default
+
+
+def resolve_tool_plan(
+    categories: list[str],
+    tool_overrides: dict[str, str] | None = None,
+) -> dict[str, list[str]]:
+    """ตัดสินว่าแต่ละ category (ที่ user เลือกจะทดสอบ) จะใช้ tool ไหน 1 ตัวเสมอ —
+    ใช้ tool_overrides[category] ถ้า user ระบุมาและเป็นตัวเลือกที่ถูกต้องจริง
+    (อยู่ใน CATEGORY_CAPABLE_TOOLS[category]) ไม่งั้น fallback ไป CATEGORY_DEFAULT_TOOL
+    """
+    tool_overrides = tool_overrides or {}
+    tool_plan: dict[str, list[str]] = defaultdict(list)
+
+    for cat in categories:
+        capable = CATEGORY_CAPABLE_TOOLS.get(cat, [])
+        if not capable:
+            continue
+
+        chosen = tool_overrides.get(cat)
+        if chosen and chosen not in capable:
+            print(
+                f"[selector] tool_overrides['{cat}']='{chosen}' ไม่ใช่ตัวเลือกที่รองรับ "
+                f"สำหรับหมวดนี้ (รองรับ: {capable}) — ใช้ default แทน"
+            )
+            chosen = None
+
+        chosen = chosen or CATEGORY_DEFAULT_TOOL.get(cat) or capable[0]
+        tool_plan[chosen].append(cat)
+
+    return dict(tool_plan)
+
+
+def _expand_dual_category_garak_rows(results: list[dict], categories: list[str]) -> list[dict]:
+    """กรอง + duplicate ผลลัพธ์ garak ที่มาจาก probe แบบ dual-category ให้ตรงกับ
+    category ที่ user ขอจริง (ดู docstring หัวไฟล์ 2026-10 รอบสิบเอ็ด สำหรับที่มาของบั๊ก
+    ที่แก้ตรงนี้) — ผลที่ไม่ใช่ tool "garak" (promptmap2/promptfoo) กรองด้วย
+    owasp_category ตรงๆ แบบเดิม ไม่ผ่าน logic นี้
+    """
+    expanded = []
+    for r in results:
+        if r.get("tool") != "garak":
+            if r.get("owasp_category") in categories:
+                expanded.append(r)
+            continue
+
+        matched_categories = [
+            c for c in garak_probe_categories(r.get("probe", "")) if c in categories
+        ]
+        for cat in matched_categories:
+            row = dict(r)
+            row["owasp_category"] = cat
+            expanded.append(row)
+
+    return expanded
 
 
 def run_scan(
     target_config: dict,
     owasp_categories: list[str] | None = None,
     depth: str = "deep",
+    tool_overrides: dict[str, str] | None = None,
 ) -> tuple[list[dict], dict, str]:
     """
-    Entry point หลักของ engine — รับ config + OWASP category ที่อยากทดสอบ
-    โปรแกรมตัดสินใจเองว่า category ไหนต้องใช้ tool ไหน (จาก CATEGORY_TOOL_MAP)
-    รันแต่ละ tool "แค่ครั้งเดียว" แม้จะถูกเลือกจากหลาย category (ไม่ยิงซ้ำ)
+    Entry point หลักของ engine
 
-    depth: "quick" (เร็ว ครอบคลุมน้อยกว่า — probe ตัวแทน 1 ตัว/category, promptmap2
-    1 iteration) หรือ "deep" (ค่าเริ่มต้น — ทุก probe ที่ map ไว้, promptmap2
-    5 iterations) ให้ user เลือกได้เองว่าจะแลกความเร็วกับความครอบคลุมแค่ไหน
-    โดยไม่ต้องไปยุ่งกับ category ที่เลือกไว้เลย (คนละมิติกัน)
+    tool_overrides: เช่น {"LLM07": "garak"} — บังคับให้หมวด LLM07 ใช้ garak แทน
+    promptfoo (default) รอบนี้ ไม่ต้องระบุครบทุกหมวด หมวดที่ไม่ได้ระบุใช้ default
+    ตามปกติ — ค่าที่ไม่ใช่ตัวเลือกที่รองรับของหมวดนั้นจะถูกเมิน (print คำเตือน)
 
     คืนค่า: (results, tool_plan, scan_id)
-        results   = list ของ dict ตาม schema กลาง รวมทุก tool ที่ถูกเรียก
-        tool_plan = dict อธิบายว่า category ไหนใช้ tool ไหน (โชว์ผู้ใช้ได้ว่าทำไมเลือกแบบนี้)
-        scan_id   = ชื่อโฟลเดอร์ผลสแกนรอบนี้ใน results/<scan_id>/ (มี report.html/.json/.csv
-        + ไฟล์ดิบของแต่ละ tool อยู่ข้างใน) — เดิมเซฟไฟล์จริงแต่ไม่คืนค่าตรงนี้เลย ทำให้
-        caller (main.py/UI) หาไฟล์ที่เซฟไว้บนดิสก์ไม่เจอ ต้องพึ่งการ build ใหม่ใน
-        memory (build_report_html) เท่านั้น
     """
     target_type = target_config.get("type")
     if target_type != "ollama":
-        # TODO: target type อื่น (openai_compatible, matthew) ต้องเขียน
-        # garak REST-generator config หรือใช้ Giskard/PyRIT ที่รองรับ custom
-        # HTTP endpoint ได้ตรงกว่า — ยังไม่ implement ในเวอร์ชันนี้
         raise NotImplementedError(
             f"target type '{target_type}' ยังไม่รองรับในเวอร์ชันนี้ — "
             "ตอนนี้ทำงานได้กับ 'ollama' เท่านั้น"
         )
 
     if depth not in ("quick", "deep"):
-        depth = "deep"  # กัน input แปลกๆ จาก API เงียบๆ แทนที่จะ error กลางสแกน
+        depth = "deep"
 
     categories = owasp_categories or SUPPORTED_OWASP_CATEGORIES
-    categories = [c for c in categories if c in CATEGORY_TOOL_MAP]  # กรองเฉพาะที่รู้จัก
+    categories = [c for c in categories if c in CATEGORY_CAPABLE_TOOLS]
 
-    # 0. แยกโฟลเดอร์ผลสแกนตามรอบ — results/<timestamp>_<model>/ เก็บไฟล์ของทุก tool
-    #    ในสแกนรอบนี้ไว้ด้วยกัน แทนที่จะเขียนทับไฟล์ผลของรอบก่อนหน้าใน results/ เฉยๆ
     safe_model = str(target_config.get("model", "unknown")).replace(":", "_").replace("/", "_")
     scan_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe_model}"
     scan_dir = RESULTS_DIR / scan_id
     scan_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. หาว่า tool ไหนถูกเลือกจาก category ไหนบ้าง (สำหรับโชว์ user + dedupe การรัน)
-    tool_plan: dict[str, list[str]] = defaultdict(list)
-    for cat in categories:
-        for tool in CATEGORY_TOOL_MAP.get(cat, []):
-            tool_plan[tool].append(cat)
+    # 1. ตัดสินว่าแต่ละ category ใช้ tool ไหน (default หรือ override) — 1 tool/category
+    tool_plan = resolve_tool_plan(categories, tool_overrides)
 
     results = []
 
-    # generations/iterations ต่อ depth — quick ยิงน้อยกว่าเพื่อความเร็ว
-    generations = 1  # เท่าเดิมทั้ง quick/deep (ตัวแปรความเร็วหลักคือจำนวน probe/rule ที่เลือก)
+    generations = 1
     promptmap2_iterations = 1 if depth == "quick" else 5
+    promptfoo_num_tests = _env_int("PROMPTFOO_QUICK_TESTS", 10) if depth == "quick" \
+        else _env_int("PROMPTFOO_DEEP_TESTS", 50)
+    _PROMPTFOO_GRADER_MODEL = os.environ.get("PROMPTFOO_GRADER_MODEL", "dolphin3") or None
 
-    # 2. รัน Garak "ครั้งเดียว" ด้วย probe ที่รวมมาจากทุก category ที่ต้องการ Garak
+    # 2. Garak
     if "garak" in tool_plan:
-        garak_categories = tool_plan["garak"]
-        probes = garak_probes_for_owasp(garak_categories, depth=depth)
+        probes = garak_probes_for_owasp(tool_plan["garak"], depth=depth)
         results.extend(run_garak_scan(
-            model_name=target_config["model"], 
+            model_name=target_config["model"],
             probes=probes,
             generations=generations,
-            # ปิด timeout ตามที่ตกลงกันไว้ (2026-09) — เจอเคสจริงว่า promptmap2
-            # ยิงนานเกิน 600s ได้ง่ายถ้า rule_types ไม่ได้ถูกจำกัด (ดู smoke_test.py)
-            # เลยขอปิด timeout ให้ทั้ง garak/promptmap2 สอดคล้องกัน แทนที่จะกำหนด
-            # ตัวเลขที่ยังไม่รู้ว่าพอหรือไม่พอ — ข้อเสีย: ถ้า subprocess ค้างจริง
-            # (เช่น Ollama ไม่ตอบ) job จะแขวนไม่มีวัน fail เอง ต้อง kill เองถ้าเจอ
             timeout_sec=None,
             output_dir=scan_dir,
         ))
 
-    # 3. รัน promptmap2 ถ้าถูกเลือก
+    # 3. promptmap2
     if "promptmap2" in tool_plan:
-        promptmap2_categories = tool_plan["promptmap2"]
-        rule_types = promptmap2_rule_types_for_owasp(promptmap2_categories)
+        rule_types = promptmap2_rule_types_for_owasp(tool_plan["promptmap2"])
         results.extend(run_promptmap2_scan(
             model_name=target_config["model"],
             ollama_url=target_config.get("base_url") or "http://localhost:11434",
@@ -120,16 +204,31 @@ def run_scan(
             controller_model=target_config.get("controller_model"),
             controller_model_type=target_config.get("controller_model_type"),
             rule_types=rule_types,
-            timeout_sec=None,  # ปิด timeout — เหตุผลเดียวกับ run_garak_scan ด้านบน
+            timeout_sec=None,
             output_dir=scan_dir,
         ))
 
-    # 4. filter ผลลัพธ์สุดท้ายให้เหลือแค่ category ที่ user เลือกจริง
-    #    (เผื่อ tool ตัวใดตัวหนึ่งคืนผลของ category ที่ไม่ได้ขอมาด้วย)
-    results = [r for r in results if r.get("owasp_category") in categories]
+    # 4. Promptfoo
+    if "promptfoo" in tool_plan:
+        plugins = promptfoo_plugins_for_owasp(tool_plan["promptfoo"], depth=depth)
+        results.extend(run_promptfoo_scan(
+            model_name=target_config["model"],
+            plugins=plugins,
+            ollama_url=target_config.get("base_url") or "http://localhost:11434",
+            system_prompt_path=target_config.get("system_prompt_path") or "system-prompt.txt",
+            num_tests=promptfoo_num_tests,
+            grader_model=_PROMPTFOO_GRADER_MODEL,
+            timeout_sec=None,
+            output_dir=scan_dir,
+        ))
 
-    # 5. เซฟ report รวม (.html + .json) ไว้ในโฟลเดอร์เดียวกับผลดิบของสแกนรอบนี้
-    #    ไม่ block การคืนค่าถ้าเซฟไม่สำเร็จ — ผลสแกนสำคัญกว่า report ไฟล์
+    # 5. filter ผลลัพธ์สุดท้ายให้เหลือแค่ category ที่ user เลือกจริง — ใช้
+    # _expand_dual_category_garak_rows() แทนการเทียบ owasp_category ตรงๆ เพราะผล
+    # จาก garak บาง probe (web_injection, exploitation, divergence.Repeat) ตรง
+    # concept มากกว่า 1 category พร้อมกัน (ดู docstring หัวไฟล์ 2026-10 รอบสิบเอ็ด)
+    results = _expand_dual_category_garak_rows(results, categories)
+
+    # 6. เซฟ report รวม
     try:
         save_reports(results, dict(tool_plan), scan_dir, target_config)
     except OSError as exc:
@@ -139,10 +238,9 @@ def run_scan(
 
 
 def summarize_by_owasp(rows: list[dict]) -> dict:
-    """จับกลุ่มผลลัพธ์ (จาก tool ไหนก็ได้ ตราบใดที่เป็น schema กลาง) ตาม OWASP category"""
     summary = defaultdict(lambda: {"pass": 0, "total": 0})
     for r in rows:
         cat = r.get("owasp_category", "Uncategorized")
-        summary[cat]["pass"] += r.get("passed", 0)
-        summary[cat]["total"] += r.get("total", 0)
+        summary[cat]["pass"] += r.get("passed") or 0
+        summary[cat]["total"] += r.get("total") or 0
     return dict(summary)

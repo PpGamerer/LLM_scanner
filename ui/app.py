@@ -12,6 +12,20 @@ Garak, promptmap2, Giskard, PyRIT เอง โปรแกรม (backend -> co
 
 รันด้วย: streamlit run ui/app.py
 ต้องมี backend (FastAPI) รันอยู่ที่ BACKEND_URL ก่อน
+
+2026-09 (fix): แก้ 2 จุดที่เกี่ยวเนื่องกัน —
+  1. เดิม target_config ที่ส่งเข้า build_report_html() เป็นตัวแปร local ที่ build
+     จากค่า widget สดๆ ของทุก rerun (Streamlit รันทั้งไฟล์ใหม่ทุก interaction)
+     ถ้า user เปลี่ยน dropdown (เช่น Model) หลังสแกนเสร็จแล้วแต่ก่อนโหลด/ดาวน์โหลด
+     report — report ที่ regenerate จะโชว์ target ผิด (ของ widget ปัจจุบัน ไม่ใช่
+     ของตอนที่สแกนจริง) อันตรายสำหรับ security report เพราะทำให้เข้าใจผิดว่าผล
+     มาจาก target ไหน แก้โดย snapshot target_config ไว้ใน session_state ตอนกด
+     Start Scan แล้วใช้ snapshot นั้นเสมอเวลา build report แทนตัวแปรสด
+  2. เดิม job_id ถูก reset (set เป็น None) เฉพาะ path status == "failed" แต่ไม่ reset
+     ตอน "done" ทำให้ rerun ถัดไปทุกครั้ง (กด checkbox, เปลี่ยน dropdown ใดๆ) ยิง
+     GET .../status และ .../report ซ้ำอีกรอบโดยไม่จำเป็น เป็นสาเหตุหลักที่ทำให้
+     บั๊ก #1 เกิดง่าย เพราะ blockแสดงผล/build report ถูกเข้าซ้ำทุก interaction
+     แก้โดย cache ผล report ไว้ใน session_state ผูกกับ job_id เดิม ไม่ fetch ซ้ำ
 """
 
 import os
@@ -62,10 +76,13 @@ if provider == "ollama":
     else:
         # ถ้าต่อไม่ติดหรือยังไม่มี ให้พิมพ์มือเหมือนเดิม
         target_config["model"] = st.text_input("Model", "dolphin3")
-        
+
 # ---- 2. เลือกหมวดที่จะทดสอบ (OWASP) — โปรแกรมเลือก tool ให้เองจากตรงนี้ ------
 st.header("2. เลือกหมวดที่จะทดสอบ (OWASP)")
-st.caption("ไม่ต้องเลือก tool เอง — ระบบจะเลือก tool ที่เหมาะสมที่สุดให้อัตโนมัติตามหมวดที่เลือก")
+st.caption(
+    "ระบบเลือก tool ที่เหมาะสมที่สุดให้อัตโนมัติตามหมวดที่เลือก — หมวดไหนมีมากกว่า "
+    "1 ตัวเลือก จะมี dropdown ให้เปลี่ยนเป็น tool อื่นแทนได้"
+)
 
 try:
     categories = requests.get(f"{BACKEND_URL}/owasp_categories", timeout=5).json()
@@ -74,9 +91,34 @@ except requests.exceptions.RequestException:
     categories = {}
 
 selected_categories = []
-for code, label in categories.items():
-    if st.checkbox(f"{code}: {label}", value=True, key=f"cat_{code}"):
+tool_overrides = {}  # {code: tool} — ใส่เฉพาะหมวดที่ user เปลี่ยนจาก default จริงๆ
+# หมายเหตุ: /owasp_categories เปลี่ยน response shape แล้ว (เดิมคืน {code: label}
+# ตรงๆ ตอนนี้คืน {code: {"label", "tools", "default_tool"}}) เพื่อให้ UI รู้ว่า
+# หมวดนี้เลือก tool ได้กี่ตัวเลือก — ถ้า backend เก่ายังไม่ได้อัปเดต endpoint นี้
+# โค้ดด้านล่างจะพังเพราะ info["label"] ใช้กับ string ไม่ได้ ต้องอัปเดต main.py คู่กัน
+for code, info in categories.items():
+    label = info["label"]
+    tools = info.get("tools", [])
+    default_tool = info.get("default_tool")
+
+    col_check, col_tool = st.columns([3, 2])
+    with col_check:
+        checked = st.checkbox(f"{code}: {label}", value=True, key=f"cat_{code}")
+    if checked:
         selected_categories.append(code)
+        if len(tools) > 1:
+            with col_tool:
+                chosen = st.selectbox(
+                    "Tool", tools,
+                    index=tools.index(default_tool) if default_tool in tools else 0,
+                    key=f"tool_{code}",
+                    label_visibility="collapsed",
+                )
+            if chosen != default_tool:
+                tool_overrides[code] = chosen
+        else:
+            with col_tool:
+                st.caption(f"tool: {tools[0] if tools else '-'}")
 
 # ---- 2.5 ความเร็ว/ความครอบคลุมของสแกน — คนละมิติกับ category ด้านบน --------
 st.header("⚙️ ความเร็วของสแกน")
@@ -158,6 +200,16 @@ st.header("3. เริ่มสแกน")
 
 if "job_id" not in st.session_state:
     st.session_state.job_id = None
+# snapshot ของ target_config ณ ตอนกด Start Scan — ใช้ตัวนี้เวลา build report เสมอ
+# (ไม่ใช้ตัวแปร target_config สดด้านบน เพราะมันเปลี่ยนตามค่า widget ปัจจุบันทุก
+# rerun ซึ่งอาจไม่ใช่ target ที่สแกนจริงแล้วถ้า user แก้ dropdown ทีหลัง)
+if "scanned_target" not in st.session_state:
+    st.session_state.scanned_target = None
+# cache ผล report ผูกกับ job_id เพื่อไม่ต้องยิง GET .../report ซ้ำทุก rerun
+if "report_cache_job_id" not in st.session_state:
+    st.session_state.report_cache_job_id = None
+if "report_cache_data" not in st.session_state:
+    st.session_state.report_cache_data = None
 
 if st.session_state.smoke_passed is not True:
     st.caption("💡 ยังไม่ได้รัน smoke test หรือยังไม่ผ่าน — กดสแกนเต็มรูปแบบได้เลยถ้ามั่นใจ แต่แนะนำให้ลอง smoke test ก่อน")
@@ -168,12 +220,22 @@ if st.button("🚀 Start Scan", type="primary"):
     elif not selected_categories:
         st.error("กรุณาเลือกอย่างน้อย 1 หมวด OWASP")
     else:
-        resp = requests.post(
-            f"{BACKEND_URL}/scan",
-            json={"target": target_config, "owasp_categories": selected_categories, "depth": depth},
-        )
+        scan_payload = {
+            "target": target_config,
+            "owasp_categories": selected_categories,
+            "depth": depth,
+        }
+        if tool_overrides:
+            scan_payload["tool_overrides"] = tool_overrides
+
+        resp = requests.post(f"{BACKEND_URL}/scan", json=scan_payload)
         if resp.status_code == 200:
             st.session_state.job_id = resp.json()["job_id"]
+            # snapshot target ตรงนี้ — คือ target ที่ backend จะสแกนจริงสำหรับ job นี้
+            st.session_state.scanned_target = dict(target_config)
+            # scan ใหม่ ล้าง cache report ของ job เก่าทิ้ง
+            st.session_state.report_cache_job_id = None
+            st.session_state.report_cache_data = None
             st.success(f"เริ่มสแกนแล้ว (job: {st.session_state.job_id[:8]}...)")
         else:
             st.error(f"เริ่มสแกนไม่สำเร็จ: {resp.text}")
@@ -207,11 +269,23 @@ if st.session_state.job_id:
             time.sleep(3)
 
     if st.session_state.job_id:  # ยังไม่ error
-        report_resp = requests.get(f"{BACKEND_URL}/scan/{job_id}/report")
-        if report_resp.status_code == 200:
-            data = report_resp.json()
+        # ใช้ cache ถ้าเคยดึง report ของ job นี้มาแล้ว ไม่ยิง request ซ้ำทุก rerun
+        if st.session_state.report_cache_job_id == job_id and st.session_state.report_cache_data is not None:
+            data = st.session_state.report_cache_data
+            report_ok = True
+        else:
+            report_resp = requests.get(f"{BACKEND_URL}/scan/{job_id}/report")
+            report_ok = report_resp.status_code == 200
+            if report_ok:
+                data = report_resp.json()
+                st.session_state.report_cache_job_id = job_id
+                st.session_state.report_cache_data = data
+
+        if report_ok:
             summary = data["summary"]
             tool_plan = data.get("tool_plan", {})
+            # target ที่ใช้ต่อจากนี้คือ snapshot ตอนกด Start Scan เสมอ ไม่ใช่ widget สด
+            scanned_target = st.session_state.scanned_target or {}
 
             # ---- โชว์ว่าระบบเลือก tool ไหนให้ ทำไม (ความโปร่งใสของ decision logic) ----
             if tool_plan:
@@ -242,13 +316,15 @@ if st.session_state.job_id:
                 )
 
             # ---- Unified Report — รวมทุก tool เป็น HTML report เดียว แนว garak ----
+                        # ---- Unified Report — ดึงไฟล์ .html ที่ backend เซฟไว้แล้วมาแสดง/ดาวน์โหลด
+            # โดยตรง (ไม่ build_report_html() ซ้ำเองใน Streamlit process อีกต่อไป) —
+            # กันปัญหา backend restart แล้ว UI ยัง import core.report เวอร์ชันเก่าค้าง
+            # ทำให้ไฟล์ที่ backend เซฟไว้กับไฟล์ที่ user ดาวน์โหลดจาก UI ไม่ตรงกัน
+            # (เจอจริง: LLM10 map ถูกใน results/ แต่ผิดในไฟล์ที่ดาวน์โหลดจาก UI)
             st.header("📄 รายงานรวม (Unified Report)")
-            if REPORT_AVAILABLE:
-                report_html = build_report_html(
-                    results=data["raw"],
-                    tool_plan=tool_plan,
-                    target_config=target_config,
-                )
+            report_html_resp = requests.get(f"{BACKEND_URL}/scan/{job_id}/report/html")
+            if report_html_resp.status_code == 200:
+                report_html = report_html_resp.text
                 st.components.v1.html(report_html, height=900, scrolling=True)
                 st.download_button(
                     "📥 ดาวน์โหลดรายงาน (HTML)",
@@ -256,19 +332,23 @@ if st.session_state.job_id:
                     file_name=f"llm_security_report_{job_id[:8]}.html",
                     mime="text/html",
                 )
-                # CSV แบบแบน 1 แถว = 1 ผล test (owasp_category, tool, probe, detector,
-                # passed, total, pass_rate) — ต่างจากปุ่ม CSV ด้านล่างที่เป็นแค่สรุปต่อ category
+            else:
+                st.warning(
+                    f"ดึงไฟล์ report จาก backend ไม่สำเร็จ "
+                    f"({report_html_resp.status_code}): {report_html_resp.text}"
+                )
+
+            if REPORT_AVAILABLE:
+                # CSV ยัง build เองได้ตามปกติ เพราะ build_report_csv() คำนวณจากตัวเลข
+                # pass/total ตรงๆ ไม่ผ่าน owasp_mapping ที่เคยมีปัญหา stale import —
+                # เสี่ยงน้อยกว่า build_report_html() มาก แต่ยังต้อง import core.report
+                # เข้าไป จะย้ายไป backend endpoint ทีหลังก็ได้ถ้าอยากตัด dependency นี้ทิ้งด้วย
                 report_csv = build_report_csv(data["raw"])
                 st.download_button(
                     "📥 ดาวน์โหลด CSV (รายละเอียดทุกแถว)",
                     data=report_csv.encode("utf-8"),
                     file_name=f"llm_security_report_{job_id[:8]}.csv",
                     mime="text/csv",
-                )
-            else:
-                st.warning(
-                    "หา core.report ไม่เจอ — เช็คว่ารัน `streamlit run ui/app.py` จาก "
-                    "project root และมีไฟล์ core/report.py อยู่จริง"
                 )
 
             st.download_button(
@@ -277,3 +357,5 @@ if st.session_state.job_id:
                 file_name=f"scan_summary_{job_id[:8]}.csv",
                 mime="text/csv",
             )
+        else:
+            st.error(f"ดึงรายงานไม่สำเร็จ: {report_resp.text}")
