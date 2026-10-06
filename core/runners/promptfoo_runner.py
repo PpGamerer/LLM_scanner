@@ -118,7 +118,7 @@ def _build_config(
             ),
             "plugins": list(plugins),
             "numTests": num_tests,
-            "strategies": [],
+            "strategies": ["jailbreak"],
         },
     }
 

@@ -17,47 +17,37 @@ garak/data/tags.misp.tsv จริงแล้วว่า Garak's tag:owasp:llm
 
 แก้ไข 2026-09 (รอบเก้า): เพิ่ม LLM05 (Improper Output Handling) — verify จาก CSV
 metadata ของ garak เองว่า "web_injection" ทั้ง family ไม่ได้อยู่ LLM01 อย่างที่เคย
-ผูกผิด แต่เป็น LLM05 (Insecure Output Handling ฉบับ 2023 = Improper Output Handling
-ฉบับ 2025) ผสมกับ LLM02 (Sensitive Info ฉบับ 2023) — ตอนนั้นเข้าใจว่าแยก subclass ได้
-ชัดเจน (MarkdownXSS/TaskXSS = LLM05 ล้วน, อีก 6 ตัว = LLM02 ล้วน) ซึ่ง**ยังไม่ถูกทั้งหมด**
-— ดูการแก้ไขรอบสิบด้านล่าง
+ผูกผิด แต่เป็น LLM05 ผสมกับ LLM02 — ตอนนั้นเข้าใจว่าแยก subclass ได้ชัดเจน ซึ่งยังไม่ถูก
+ทั้งหมด (ดูรอบสิบ)
 
 แก้ไข 2026-10 (รอบสิบ): verify เพิ่มด้วย `garak --plugin_info` ตรงบนเครื่องจริง (ไม่ผ่าน
 CLI parser, อ่าน tags attribute ตรงจาก source) เทียบกับ CSV export — เจอว่าความเข้าใจ
 เรื่อง subclass-level split ของรอบเก้าไม่ถูกทั้งหมด:
   1. `ansiescape.AnsiEscaped`/`AnsiRaw` มี tag `owasp:llm01;owasp:llm02;owasp:llm05`
      (3 หมวดฉบับ 2023) ไม่ใช่ LLM05 ล้วนอย่างที่เคยผูกไว้ — แปลงเป็น 2025 แล้วหนึ่งใน
-     สามคือ LLM03 (Supply Chain) ซึ่ง**ไม่มีอยู่ใน OWASP_CATEGORIES ของระบบนี้เลย**
-     เพิ่ม category ใหม่สำหรับ probe แค่ 2 ตัวไม่คุ้ม — **เอา `ansiescape` ออกทั้งหมด**
-     (เหมือนที่เคยเอา `web_injection` ออกจาก LLM01 ทั้ง family ในรอบเก้า และเหมือนที่
-     เอา `owasp:llm:01` ออกจาก promptfoo reverse-map ไปก่อนหน้า — pattern เดียวกัน:
-     ถ้า probe ตัวหนึ่งพาดพิง category ที่ระบบไม่รองรับ และมีตัวอื่นที่ชัดเจนกว่าพอใช้
-     อยู่แล้ว ให้ตัดออกไปเลยดีกว่าฝืนแยก)
+     สามคือ LLM03 (Supply Chain) ซึ่งไม่มีอยู่ใน OWASP_CATEGORIES ของระบบนี้เลย —
+     เอา `ansiescape` ออกทั้งหมด
   2. `exploitation.JinjaTemplatePythonInjection`/`SQLInjectionEcho` มี tag
      `owasp:llm02;owasp:llm06` (2023) = LLM05+LLM02 (2025) คู่กันทั้งคู่ ไม่มีทางแยก
-     subclass แบบ web_injection ได้ (ทั้ง 2 ตัวเป็น dual-category เหมือนกันหมด ไม่ใช่
-     บางตัว LLM05 ล้วนบางตัว LLM02 ล้วน) — ยังอยู่ LLM05 เหมือนเดิม แต่เพิ่มการ "แถม"
-     เข้า LLM02 ด้วยผ่าน garak_probes_for_owasp() (pattern เดียวกับ divergence.Repeat
-     ที่ใช้ร่วม LLM02+LLM10 อยู่แล้ว)
-  3. **สำคัญที่สุด**: `web_injection.MarkdownXSS` เอง (ที่เคยคิดว่า "LLM05 ล้วน" แยก
-     ออกจากอีก 6 subclass ที่เป็น LLM02) จริงๆ มี tag แค่ `owasp:llm02;owasp:llm06`
-     เหมือนกับอีก 6 ตัวเป๊ะ — **ไม่มี owasp:llm01 ปนอยู่เลย และไม่ได้ "ล้วน" แบบที่
-     เข้าใจไปก่อนหน้า** สรุปคือทุก subclass ของ web_injection (รวม MarkdownXSS/TaskXSS)
-     เป็น LLM05+LLM02 คู่กันหมดทุกตัว ไม่ต่างกันเลย — เลยไม่ต้องแยกระดับ subclass อีก
-     ต่อไป ใช้ bare family key "web_injection" ได้ปลอดภัย (ตรงกับที่ verify แล้วว่า
-     ทุก subclass active ไม่มีตัวไหน 💤) แล้วแถมเข้า LLM02 ด้วย pattern เดียวกับ
-     exploitation ข้อ 2
-  **บทเรียนจากรอบนี้**: เจอ "exploitation"/"web_injection" ที่ดูเหมือนแยก subclass
-  ได้ (เหมือน divergence.Repeat/.RepeatedToken ในรอบสี่) แต่จริงๆ ไม่ใช่ — ทุก
-  subclass ที่ active ของทั้งสอง family นี้เป็น dual-category เหมือนกันหมด ก่อนจะ
-  แยก subclass ต้อง verify ทีละตัวจริงๆ (`--plugin_info` หรืออ่าน `.tags` จาก source
-  ตรงๆ) ไม่ใช่เดาจากชื่อ subclass ว่า "น่าจะ" ต่างหมวดกัน
+     subclass ได้ — เพิ่มเข้า LLM02 ด้วยผ่าน garak_probes_for_owasp()
+  3. `web_injection.MarkdownXSS` เองก็มี tag แค่ `owasp:llm02;owasp:llm06` เหมือนกับ
+     อีก 6 subclass เป๊ะ ไม่ได้ "ล้วน" แบบที่เข้าใจไปก่อนหน้า — ทุก subclass ของ
+     web_injection เป็น LLM05+LLM02 คู่กันหมดทุกตัว ใช้ bare family key ได้ปลอดภัย
 
-⚠️ ยังไม่ชี้ขาด (ณ 2026-10): `promptinject` ยังอยู่ใน GARAK_PROBE_OWASP_MAP ด้านล่าง
-(ไม่ได้เอาออก) แม้ `--list_probes` รอบก่อนจะโชว์ว่า subclass ที่รู้จัก 6 ตัวเป็น 💤
-หมด — เอกสารเปรียบเทียบ Garak vs Promptfoo ของทีมแย้งว่า active (✅) โดยไม่ breakdown
-ระดับ subclass ให้ดู ยังไม่มีใครรัน `garak --probes promptinject` จริงเพื่อชี้ขาดว่า
-error "all plugins marked inactive" หรือไม่ — เก็บไว้ตามเดิมจนกว่าจะมีผลทดสอบจริง
+แก้ไข 2026-10 (รอบสิบเอ็ด): เพิ่ม GARAK_DUAL_CATEGORY_PROBES เป็น single source of
+truth สำหรับ probe ที่ตรง concept มากกว่า 1 category — ของเดิมแก้แค่ฝั่ง "เลือกรัน"
+(garak_probes_for_owasp เติม probe เข้า category รองให้) แต่ลืมฝั่ง "อ่านผลกลับมา
+จัดหมวด" (garak_probe_to_owasp ยังคืนแค่ primary เดียว) ทำให้ผลของ probe dual-category
+โดนกรองทิ้งเงียบๆ ตอน filter ด้วย category รอง — แก้ด้วย garak_probe_categories() ที่
+คืนทุก category ที่ probe ตรง ใช้ตอน filter ผลสุดท้ายใน selector.py แทน
+
+แก้ไข 2026-10 (รอบสิบสอง): ปิดจบสถานะ `promptinject` ที่ค้างไว้ตั้งแต่รอบสิบ — verify
+ซ้ำกับ `garak --list_probes` วันที่ 2026-10-02 (เครื่องเดียวกับที่ verify
+exploitation/web_injection ด้วย --plugin_info) ยืนยันชัดว่า `promptinject.
+HijackHateHumans`, `.HijackKillHumans`, `.HijackLongPrompt` **active จริงทั้ง 3 ตัว**
+มีแค่ 3 ตัว `*Full` เท่านั้นที่ dormant (💤) — ตรงกับ pattern เดียวกับทุก family อื่น
+ในระบบ (ตัวเต็ม active, ตัว *Full dormant) ไม่ใช่ dormant ทั้ง family แบบที่เคยกังวลไว้
+`"promptinject": "LLM01"` จึงถูกต้องตามเดิม ไม่ต้องแก้ — ปิดเป็น resolved
 """
 
 OWASP_CATEGORIES = {
@@ -82,26 +72,36 @@ OWASP_CATEGORIES = {
 # Theft)->LLM10(Unbounded Consumption, รวม concept เก่าสองอันเข้าด้วยกัน)) ถ้าจะ
 # cross-reference กับเลข tag เดิมของ Garak ให้เช็คตารางเทียบแยกต่างหาก อย่าเอามาปน
 # กับ dict นี้
+#
+# ⚠️ เตือนซ้ำอีกชั้น: tag:owasp:llm01 ของ Garak (ฉบับ 2023) ดึง probe ปนมาเยอะกว่าที่
+# คิด ไม่ใช่แค่ promptinject/dan/encoding ที่ curate ไว้ที่นี่ — sysprompt_extraction,
+# latentinjection, phrasing, doctor, dra, sata, goodside.Tag,
+# smuggling.HomoglyphObfuscation, adaptive_attacks ก็ติด owasp:llm01 (2023) เหมือนกัน
+# ทั้งที่บางตัว curate ไว้เป็น category อื่นในไฟล์นี้ (เช่น sysprompt_extraction ->
+# LLM07) — เป็นอีกเหตุผลที่ห้ามใช้ tag shorthand แม้แต่ "หมวดที่เลขนิ่งข้ามฉบับ" อย่าง
+# LLM01 ต้องระบุชื่อ module ตรงๆ เสมอ (ยืนยันจากคู่มือทดสอบของทีมที่เจอปัญหานี้จริง)
 GARAK_PROBE_OWASP_MAP = {
     # LLM01: Prompt Injection
-    # ⚠️ ยังไม่ชี้ขาด (ดู docstring หัวไฟล์) — เก็บไว้ตามเดิม ไม่เอาออก
+    # verify แล้ว 2026-10 (รอบสิบสอง): active จริง 3/6 subclass (HijackHateHumans,
+    # HijackKillHumans, HijackLongPrompt) — *Full variants dormant ตาม pattern ปกติ
+    # ของทุก family ในระบบ ไม่ใช่ dormant ทั้ง family — ยืนยันซ้ำกับ --list_probes
+    # 2026-10-02 แล้วว่าถูกต้อง ไม่ต้องเอาออก
     "promptinject": "LLM01",
     "dan": "LLM01",
     "encoding": "LLM01",       # prompt injection ผ่านการเข้ารหัส payload (base64/rot13/...)
     # LLM05: Improper Output Handling
     #
-    # 2026-10 (รอบสิบ): ใช้ bare family key ได้แล้วสำหรับ web_injection — verify ด้วย
-    # `--plugin_info` ตรงบนเครื่องจริงว่าทุก subclass (รวม MarkdownXSS/TaskXSS ที่
-    # เคยคิดว่าเป็น LLM05 ล้วนแยกจากตัวอื่น) มี tag `owasp:llm02;owasp:llm06` (2023)
-    # เหมือนกันหมดทุกตัว ไม่มีตัวไหนมี owasp:llm01 ปนเลย — แปลเป็น 2025 คือ LLM05+LLM02
-    # คู่กันทุก subclass ไม่ต้องแยกระดับ subclass อีกต่อไป (ของเดิมที่เคยแยกไว้ 8 บรรทัด
-    # เป็นความเข้าใจผิด — ดู docstring หัวไฟล์ข้อ 3) ส่วน LLM02 เพิ่มให้ผ่าน
+    # 2026-10 (รอบสิบ, ยืนยันซ้ำรอบสิบสองด้วย --plugin_info ตรง): ใช้ bare family key
+    # ได้แล้วสำหรับ web_injection — ทุก subclass (รวม MarkdownXSS/TaskXSS ที่เคยคิดว่า
+    # เป็น LLM05 ล้วนแยกจากตัวอื่น) มี tag `owasp:llm02;owasp:llm06` (2023) เหมือนกัน
+    # หมดทุกตัว ไม่มีตัวไหนมี owasp:llm01 ปนเลย — แปลเป็น 2025 คือ LLM05+LLM02 คู่กัน
+    # ทุก subclass ไม่ต้องแยกระดับ subclass อีกต่อไป ส่วน LLM02 เพิ่มให้ผ่าน
     # garak_probes_for_owasp() ด้านล่าง (pattern เดียวกับ divergence.Repeat)
     "web_injection": "LLM05",
     # exploitation: JinjaTemplatePythonInjection + SQLInjectionEcho active
     # (SQLInjectionSystem 💤) ทั้งคู่มี tag owasp:llm02;owasp:llm06 (2023) = LLM05+LLM02
-    # เหมือนกันทั้งคู่ ไม่มีทางแยก subclass ได้ (verify ด้วย --plugin_info แล้ว) —
-    # เพิ่มเข้า LLM02 ด้วยผ่าน garak_probes_for_owasp() เช่นกัน
+    # เหมือนกันทั้งคู่ — verify ซ้ำด้วย --plugin_info ตรง 2026-10-02 แล้วตรงเป๊ะ ไม่มีทาง
+    # แยก subclass ได้ — เพิ่มเข้า LLM02 ด้วยผ่าน garak_probes_for_owasp() เช่นกัน
     "exploitation": "LLM05",
     # "ansiescape" เอาออกแล้ว (2026-10 รอบสิบ) — verify ด้วย --plugin_info ว่า
     # AnsiEscaped/AnsiRaw มี tag owasp:llm01;owasp:llm02;owasp:llm05 (2023) สามหมวด
@@ -130,20 +130,14 @@ GARAK_PROBE_OWASP_MAP = {
 }
 
 
-# ⚠️ 2026-10 (รอบสิบเอ็ด): probe บางตัวใน GARAK_PROBE_OWASP_MAP ข้างบนตรง concept
-# มากกว่า 1 OWASP category จริง (verify จาก garak tag metadata) แต่ dict ข้างบนเก็บได้
-# แค่ 1 "primary" category ต่อ probe เท่านั้น (เป็น flat dict แบบ str -> str)
+# probe บางตัวใน GARAK_PROBE_OWASP_MAP ข้างบนตรง concept มากกว่า 1 OWASP category จริง
+# (verify จาก garak tag metadata) แต่ dict ข้างบนเก็บได้แค่ 1 "primary" category ต่อ
+# probe เท่านั้น (เป็น flat dict แบบ str -> str)
 #
-# เดิมแก้ปัญหานี้แค่ "ฝั่งเลือกรัน" (garak_probes_for_owasp เติม probe เข้า category
-# รองให้ด้วย) แต่ลืม "ฝั่งอ่านผลกลับมาจัดหมวด" (garak_probe_to_owasp ยังคืนแค่
-# primary category เดียวเสมอ) ผลคือ: รัน probe ถูกตัวแล้วจริง แต่พอ selector.py
-# filter ผลสุดท้ายด้วย `owasp_category in categories` แถวที่มาจาก probe dual-category
-# จะโดนกรองทิ้งเงียบๆ ถ้า user ขอ category รองที่ไม่ใช่ primary (เช่น ขอ LLM10
-# อย่างเดียว แต่ divergence.Repeat ถูก parse เป็น LLM02 เสมอ เลยหายจากผล LLM10)
-#
-# แก้ด้วย dict เดียวนี้เป็น single source of truth — ทั้ง garak_probes_for_owasp()
-# (เลือกรัน) และ garak_probe_categories() (จัดหมวดผลลัพธ์ตอน filter ใน selector.py)
-# อ่านจาก dict เดียวกันนี้ กันสองฝั่งหลุด sync กันอีกแบบที่เคยเกิดมาแล้ว
+# ทั้ง garak_probes_for_owasp() (เลือกรัน) และ garak_probe_categories() (จัดหมวดผล
+# ลัพธ์ตอน filter ใน selector.py) อ่านจาก dict เดียวนี้ กันสองฝั่งหลุด sync กัน (เจอ
+# บั๊กนี้มาแล้วตอนรอบสี่ที่แก้แค่ฝั่งเดียว — ดูรายละเอียดใน README หัวข้อ "บั๊กที่ต้อง
+# จำไว้")
 #
 # key = ชื่อ probe เดียวกับที่ใช้เป็น key ใน GARAK_PROBE_OWASP_MAP (primary category
 # อยู่ที่นั่นแล้ว ไม่ต้องเขียนซ้ำ) value = list ของ category "เพิ่มเติม" ที่ probe นี้
@@ -208,11 +202,10 @@ def garak_probes_for_owasp(owasp_codes: list[str], depth: str = "deep") -> list[
     """กลับทาง: จาก OWASP category ที่เลือก -> probe ของ Garak ที่ต้องยิง
 
     depth="deep": ทุก probe ที่ map ไว้ใน GARAK_PROBE_OWASP_MAP บวก probe ที่ "แถม"
-    เข้าหลาย category (ดู 3 if ด้านล่าง — divergence.Repeat เข้า LLM10 ด้วย,
-    web_injection/exploitation เข้า LLM02 ด้วย) เพราะ flat dict ผูก 1 probe ได้แค่
-    1 category เท่านั้น ถ้า probe ตัวหนึ่งต้องใช้กับ 2 category พร้อมกัน (ยืนยันจาก
-    garak tag metadata จริงว่า dual-category) ต้องเติมเองแบบนี้ ไม่งั้นมันจะหายไปจาก
-    category หนึ่งเงียบๆ (บทเรียนจากรอบสี่ที่เจอกับ divergence.Repeat ครั้งแรก)
+    เข้าหลาย category (อ่านจาก GARAK_DUAL_CATEGORY_PROBES) เพราะ flat dict ผูก 1
+    probe ได้แค่ 1 category เท่านั้น ถ้า probe ตัวหนึ่งต้องใช้กับ 2 category พร้อมกัน
+    (ยืนยันจาก garak tag metadata จริงว่า dual-category) ต้องเติมเองแบบนี้ ไม่งั้นมัน
+    จะหายไปจาก category หนึ่งเงียบๆ
     depth="quick": probe ตัวแทน 1 ตัว/category จาก GARAK_QUICK_PROBES (ไม่บวกเพิ่ม)
     """
     if depth == "quick":
@@ -224,11 +217,6 @@ def garak_probes_for_owasp(owasp_codes: list[str], depth: str = "deep") -> list[
         probe for probe, code in GARAK_PROBE_OWASP_MAP.items()
         if code in owasp_codes
     }
-    # 2026-10 (รอบสิบเอ็ด): เปลี่ยนจาก if-block แยกทีละ probe (ของเดิม 2 if ตายตัว
-    # สำหรับ divergence.Repeat/web_injection/exploitation) เป็น loop อ่านจาก
-    # GARAK_DUAL_CATEGORY_PROBES ตัวเดียว — กันไม่ให้ "ฝั่งเลือกรัน" (ตรงนี้) กับ
-    # "ฝั่งจัดหมวดผลลัพธ์" (garak_probe_categories ด้านบน) หลุด sync กันอีก ถ้าเพิ่ม
-    # probe dual-category ตัวใหม่ แก้ที่ GARAK_DUAL_CATEGORY_PROBES ที่เดียวพอ
     for probe, extra_categories in GARAK_DUAL_CATEGORY_PROBES.items():
         if any(c in owasp_codes for c in extra_categories):
             result.add(probe)

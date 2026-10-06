@@ -47,6 +47,27 @@ CATEGORY_DEFAULT_TOOL = {
 `pyrit_runner.py` + custom RAG scenario ก่อนถึงจะเพิ่มเข้า UI ได้ (`LLM03`, `LLM04`
 ก็เช่นกัน — ไม่มี probe/plugin สำเร็จรูปตรง concept ในทั้งสอง tool)
 
+## คำเตือนสำคัญ: ห้ามใช้ `tag:owasp:llmXX` ของ Garak เลยสักหมวด แม้แต่ LLM01
+
+เคยเข้าใจว่า LLM01 เป็น "หมวดที่เลขนิ่งข้ามฉบับ" จึงใช้ `tag:owasp:llm01` (shorthand)
+ได้อย่างปลอดภัย — **เข้าใจผิด** คู่มือทดสอบของทีมเจอจริงว่า `tag:owasp:llm01` (ฉบับ
+2023 ของ Garak) ดึง probe ปนมาเยอะกว่าที่ curate ไว้ใน `GARAK_PROBE_OWASP_MAP` มาก:
+นอกจาก `promptinject`/`dan`/`encoding` แล้ว ยังมี `sysprompt_extraction` (curate ไว้
+เป็น **LLM07** ในระบบนี้), `latentinjection`, `phrasing`, `doctor`, `dra`, `sata`,
+`goodside.Tag`, `smuggling.HomoglyphObfuscation`, `adaptive_attacks` ติด tag นี้ด้วย
+ทั้งหมด — **ต้องระบุชื่อ module ตรงๆ เสมอทุกหมวด ไม่มีข้อยกเว้น** (`probes.promptinject,
+probes.dan,probes.encoding` สำหรับ LLM01) ห้ามใช้ `tag:owasp:llmXX` เป็น shortcut
+แม้แต่หมวดเดียว
+
+⚠️ **ถ้าทดสอบด้วย `garak --probes <family>` ผ่าน CLI มือ**: flag `--probes`
+(deprecated ตั้งแต่ v0.15.1.pre1) จะขึ้น `"nothing to do"` ถ้าใส่ชื่อ family เดี่ยว
+ไม่มีคอมม่าคั่น แม้ family นั้น active จริง — ยืนยันแล้ว (2026-10 รอบสิบสาม) ทั้ง `dan`
+(รู้แน่ชัดว่า active) และ `promptinject` ได้ผล `"nothing to do"` เหมือนกันทุกตัวอักษร
+ไม่เกี่ยวกับสถานะ active/dormant ใดๆ เลย **ไม่กระทบ pipeline จริง** เพราะ
+`garak_runner.py` ส่ง `",".join(probes)` เสมอ ไม่เคยส่งชื่อ family เดี่ยวผ่าน flag นี้
+— ถ้าจะทดสอบ CLI มือ ใส่อย่างน้อย 2 probe คั่นด้วยคอมม่าเสมอ หรือใช้ `--spec` แทน
+ตามที่คู่มือทดสอบของทีมใช้อยู่
+
 ## LLM05 (Improper Output Handling) — เพิ่มใหม่ (2026-09/10 รอบเก้า-สิบ)
 
 ตอนแรกคิดว่า `web_injection` ทั้ง family ควรอยู่ LLM01 (ผูกไว้แบบนั้นมาตั้งแต่ต้น) —
@@ -61,9 +82,12 @@ Handling) + LLM02 (Sensitive Info Disclosure) คู่กันทุก subcla
   ตรงบนเครื่องแล้วพบว่า `MarkdownXSS` เองก็มี tag `owasp:llm02;owasp:llm06` เหมือน
   อีก 6 ตัวเป๊ะ ไม่ได้ "ล้วน" ตามที่เข้าใจ — เลยเปลี่ยนมาใช้ **bare family key
   `"web_injection"`** (ปลอดภัยเพราะทุก subclass อยู่ dual-category เดียวกันหมด) แทน
-  การแยกระดับ subclass ที่เคยทำไว้
+  การแยกระดับ subclass ที่เคยทำไว้ — **ยืนยันซ้ำอีกรอบ (2026-10-02) ด้วย
+  `--plugin_info probes.web_injection.MarkdownXSS` ตรงๆ ผลตรงกันเป๊ะ ปิดเป็น
+  resolved แล้ว**
 - `exploitation` (`JinjaTemplatePythonInjection`, `SQLInjectionEcho`) ก็ dual-category
-  เดียวกัน (LLM05+LLM02) — ยืนยันแล้วว่าไม่มีทางแยก subclass ได้เหมือนกัน
+  เดียวกัน (LLM05+LLM02) — ยืนยันแล้วว่าไม่มีทางแยก subclass ได้เหมือนกัน (verify ซ้ำ
+  2026-10-02 ด้วย `--plugin_info` ตรงทั้ง 2 probe ผลตรงกันเป๊ะ ปิดเป็น resolved)
 - `ansiescape` เคยถูกผูกไว้ที่ LLM05 ด้วย (คิดว่าเบาและชัดเจนสุด) แต่ verify แล้วว่า
   tag จริงคือ `owasp:llm01;owasp:llm02;owasp:llm05` (3 หมวดฉบับ 2023!) แปลงเป็น 2025
   แล้วหนึ่งในสามคือ **LLM03 (Supply Chain) ที่ไม่มีอยู่ใน `OWASP_CATEGORIES` ของระบบ
@@ -74,11 +98,13 @@ Handling) + LLM02 (Sensitive Info Disclosure) คู่กันทุก subcla
 สำเร็จรูปเหมือนหมวดอื่น เลยยังไม่มี runner รองรับใน codebase นี้ — `CATEGORY_CAPABLE_TOOLS["LLM05"]`
 มีแค่ `["garak"]` ตัวเดียว
 
-⚠️ **`promptinject` (LLM01) ยังไม่ชี้ขาด** — `--list_probes` เคยโชว์ว่า subclass ที่
-รู้จัก 6 ตัวเป็น 💤 (dormant) หมด แต่เอกสารเปรียบเทียบของทีมแย้งว่า active (✅) โดยไม่
-breakdown ระดับ subclass ให้ดู ยังไม่มีใครรัน `garak --probes promptinject` จริงเพื่อ
-ชี้ขาดว่า error "all plugins marked inactive" หรือไม่ — เก็บไว้ในแมปตามเดิมจนกว่าจะมี
-ผลทดสอบจริง (ดู `owasp_mapping.py` สำหรับรายละเอียด)
+✅ **`promptinject` (LLM01) — ปิดจบแล้ว (2026-10 รอบสิบสอง)**: เคยกังวลว่า
+`--list_probes` รอบก่อนโชว์ว่า subclass ที่รู้จัก 6 ตัวเป็น 💤 (dormant) หมด ขัดกับ
+เอกสารเปรียบเทียบของทีมที่บอกว่า active — verify ซ้ำกับ `--list_probes` วันที่
+2026-10-02 ยืนยันชัดว่า `HijackHateHumans`/`HijackKillHumans`/`HijackLongPrompt`
+**active จริงทั้ง 3 ตัว** มีแค่ 3 ตัว `*Full` เท่านั้นที่ dormant (pattern เดียวกับทุก
+family อื่นในระบบ) — ข้อมูลที่เคยเห็นว่า "dormant หมด" เป็นการอ่าน/บันทึกผิดพลาดจาก
+แหล่งอื่น ไม่ใช่สถานะจริงของ garak — `"promptinject": "LLM01"` ถูกต้องตามเดิม
 
 ## บั๊กที่ต้องจำไว้: probe เดียวตรงได้มากกว่า 1 category (dual-category probes)
 
@@ -103,7 +129,9 @@ source of truth ตัวเดียว — ทั้ง `garak_probes_for_owas
 เดียวกันนี้ ถ้าเจอ probe dual-category ตัวใหม่ในอนาคต แก้ที่ `GARAK_DUAL_CATEGORY_PROBES`
 จุดเดียวพอ ไม่ต้องแก้ 2 ที่แยกกันเหมือนที่ผ่านมา — **บทเรียน**: เจอ probe ที่ "ต้องรัน
 เพื่อ category อื่นด้วย" ต้องเช็คทั้งสองทิศทาง (รันถูกไหม + ผลถูกจัดหมวดถูกไหม) พร้อม
-กันเสมอ ไม่ใช่แก้ทิศทางเดียวแล้วถือว่าจบ
+กันเสมอ ไม่ใช่แก้ทิศทางเดียวแล้วถือว่าจบ — **ยืนยันทั้ง 3 probe (`divergence.Repeat`,
+`web_injection`, `exploitation`) ด้วย `--plugin_info` ตรงจากซอร์สแล้วรอบสิบสอง ปิดเป็น
+resolved ทั้งหมด ไม่ต้อง verify ซ้ำอีก**
 
 ## Promptfoo — ✅ verify แล้ว (ไม่ใช่ "ยังไม่เคยรันจริง" อีกต่อไป)
 
@@ -184,12 +212,13 @@ Ollama ไม่ตอบ) job จะแขวนไม่มีวันจบ�
 `promptfoo plugins=["harmful:hate"], num_tests=1`)
 
 ⚠️ **ยังไม่ verify**: `smoke_test_garak()` ใช้ probe `"test.Blank"` ซึ่งเป็น probe ที่
-`--list_probes` โชว์เป็น 💤 (dormant) — ไม่เหมือน `propile`/`promptinject` ที่ dormant
-ทั้ง family (ส่งชื่อ family เปล่าๆ แล้ว error) ตรงนี้ส่งชื่อ **เต็ม** `"test.Blank"`
-ตรงๆ (ไม่ใช่แค่ `"test"`) ซึ่งตามหลักการ (probe ที่ sleeping ยังเรียกตรงๆ ด้วยชื่อเต็ม
-ได้) น่าจะรันได้ปกติ — **แต่ยังไม่เคยยืนยันจริงว่า garak ปฏิบัติกับ dormant probe ที่
-ถูกเรียกชื่อเต็มต่างจาก family เปล่าๆ จริงหรือเปล่า** ควรรัน smoke test จริงสักรอบแล้ว
-เช็ค error log ก่อนเชื่อ 100%
+`--list_probes` โชว์เป็น 💤 (dormant) — ไม่เหมือน `propile` ที่ dormant ทั้ง family
+(ส่งชื่อ family เปล่าๆ แล้ว error) ตรงนี้ส่งชื่อ **เต็ม** `"test.Blank"` ตรงๆ (ไม่ใช่แค่
+`"test"`) ซึ่งตามหลักการ (probe ที่ sleeping ยังเรียกตรงๆ ด้วยชื่อเต็มได้ — ยืนยันแล้ว
+จาก pattern เดียวกันกับ `promptinject` subclass ที่ active เรียกตรงได้ปกติ) น่าจะรันได้
+ปกติ — **แต่ยังไม่เคยยืนยันจริงว่า garak ปฏิบัติกับ dormant probe ที่ถูกเรียกชื่อเต็ม
+ต่างจาก family เปล่าๆ จริงหรือเปล่า** ควรรัน smoke test จริงสักรอบแล้วเช็ค error log
+ก่อนเชื่อ 100%
 
 **บั๊กที่รู้แล้วแต่ยังไม่แก้**: `smoke_test_promptmap2()` ไม่ได้ส่ง `rule_types` เลย ทำให้
 promptmap2 รันทุก rule ทุก type แทนที่จะเบาจริงๆ อย่างที่ตั้งใจ — นี่คือสาเหตุที่เคยชน
@@ -247,10 +276,11 @@ llm_scanner/
   บวก pass/total ซ้ำกันตอนสรุปผล (1 probe ที่โดนเช็คด้วย 2 detector ไม่ควรถูกนับเป็น
   2 เท่าของจำนวนจริง)
 - ✅ **`GARAK_PROBE_OWASP_MAP` + `GARAK_DUAL_CATEGORY_PROBES`** — verify กับ
-  `garak --list_probes`/`--plugin_info` จริงหลายรอบ (v0.17.0):
+  `garak --list_probes`/`--plugin_info` จริงหลายรอบ (v0.17.0, ล่าสุด 2026-10-02):
   - `"xss"` ไม่มี probe family นี้จริง — แก้เป็น `"web_injection"` แล้ว ตอนนี้ map เข้า
     **LLM05** (ไม่ใช่ LLM01 อย่างที่เคยผูกไว้ตอนแรก — ดูหัวข้อ "LLM05" ด้านบน) ผ่าน
-    bare family key + dual-category กับ LLM02
+    bare family key + dual-category กับ LLM02 — **ยืนยันซ้ำด้วย `--plugin_info` ตรง
+    2026-10-02 แล้ว ปิดเป็น resolved**
   - `"continuation"` ไม่มีจริง — เคยลองแก้เป็น `"propile"` แต่ verify แล้วพัง: ทุก
     subclass เป็น dormant หมด garak error ทันที `"all plugins marked inactive"` —
     เอาออกจาก mapping แล้ว ไม่หาตัวแทนใหม่ (leakreplay+divergence.Repeat พอแล้ว)
@@ -259,7 +289,8 @@ llm_scanner/
   - `"divergence"` แยกระดับ subclass แล้ว (`.Repeat`→LLM02, `.RepeatedToken`→LLM10)
     เพราะ 2 subclass นี้ต้องแยกคนละ category — ทั้งคู่ dual-category กับอีกฝั่งด้วย
     (ดูหัวข้อ "บั๊กที่ต้องจำไว้" ด้านบน)
-  - ⚠️ `promptinject` (LLM01) **ยังไม่ชี้ขาด** — ดูหัวข้อ "LLM05" ด้านบน
+  - ✅ **`promptinject` (LLM01) ปิดจบแล้ว** — active จริง 3/6 subclass (ไม่ใช่ dormant
+    ทั้ง family อย่างที่เคยกังวล) ยืนยันซ้ำกับ `--list_probes` 2026-10-02 แล้ว
   - **บทเรียน**: ก่อนเพิ่ม probe family ใหม่เข้า mapping ต้องเช็ค (1) ไม่ใช่ dormant
     ทั้ง family (เครื่องหมาย 💤 ทุกตัวใน `--list_probes`) และ (2) ไม่ใช่ dual-category
     กับหมวดอื่นที่ยังไม่ได้ map ไว้ (เช็คด้วย `--plugin_info` หรืออ่าน `.tags` จาก
@@ -297,11 +328,12 @@ llm_scanner/
 - ✅ **Smoke test** — ยิงสแกนจริงขนาดจิ๋ว (garak, promptmap2, promptfoo) ก่อนสแกนเต็ม
   รูปแบบ ต่อเข้า UI แล้ว (ปุ่ม "Run Smoke Test") แต่ยังมี 2 จุดค้าง (ดูหัวข้อ "Depth"
   ด้านบน: `test.Blank` dormant ยังไม่ verify, `rule_types` ของ promptmap2 ยังไม่ถูกจำกัด)
-- ⚠️ **โหมด `depth="deep"` ยัง verify ไม่ครบทุกหมวด**: quick mode ยืนยันแล้วว่าผ่านจริง
-  สำหรับหมวดที่ลองไป — deep mode ที่เพิ่งแก้ `web_injection`/`exploitation`/
-  `GARAK_DUAL_CATEGORY_PROBES` ยังไม่เคยรันจนจบสำเร็จให้เห็นสักครั้งหลังแก้รอบล่าสุด
-  **ควรลอง deep mode LLM02/LLM05/LLM10 อีกรอบเพื่อยืนยันว่า dual-category expansion
-  ทำงานถูกต้องกับข้อมูลจริง** (ไม่ใช่แค่ mock data ที่ verify ไว้ตอนเขียนโค้ด)
+- ✅ **โหมด `depth="deep"` verify แล้วกับข้อมูลจริง (2026-10)**: รัน deep mode ครบ
+  ทุกหมวด (LLM01/02/05/06/07/09/10) จนจบสำเร็จ — ยืนยัน GARAK_DUAL_CATEGORY_PROBES/
+  _expand_dual_category_garak_rows()/_dedupe_probe_stats() ทำงานถูกต้องร่วมกัน
+  ตรวจสอบเลขย้อนกลับแล้วตรง 100%: divergence.Repeat โผล่ถูกทั้ง LLM02+LLM10,
+  web_injection/exploitation โผล่ถูกทั้ง LLM02+LLM05, summary ของ LLM10 (34/86)
+คำนวณจากแถวดิบได้ตรงเป๊ะ
 - ❌ **target type "openai_compatible" / "matthew"** — ยังไม่ implement ใน `selector.py`
   จะ raise `NotImplementedError` ถ้าเรียกใช้ตอนนี้ **บั๊กที่พบเพิ่ม**: `ui/app.py` มีให้
   เลือก provider `"openai_compatible"` ในดรอปดาวน์ด้วย แต่ไม่มี input field
@@ -364,17 +396,13 @@ python -m core.smoke_test
 
 ## Next steps
 
-1. **ยืนยัน `test.Blank` (garak smoke test) ว่าจริงๆ รันได้แม้เป็น 💤** — ยังไม่เคย
-   verify ว่า garak ปฏิบัติกับ dormant probe ที่ถูกเรียกชื่อเต็มต่างจาก family เปล่าๆ
-   จริงหรือไม่ (ดูหัวข้อ "Depth" ด้านบน)
-2. ชี้ขาดสถานะ `promptinject` (LLM01) — รัน `garak --probes promptinject` จริงสักครั้ง
-3. **รัน deep mode LLM02/LLM05/LLM10 จริงสักครั้ง** เพื่อยืนยันว่า
-   `GARAK_DUAL_CATEGORY_PROBES`/`_expand_dual_category_garak_rows()` ทำงานถูกต้อง
-   กับข้อมูลจริง ไม่ใช่แค่ mock data
-4. แก้ `Dockerfile.backend` เพิ่ม Node.js + `npm install -g promptfoo`
-5. จำกัด `rule_types` ให้ `smoke_test_promptmap2()` เพื่อให้ smoke test เบาจริง
-6. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
-7. เขียน custom assertion ของ Promptfoo สำหรับ LLM05 (ตอนนี้ garak ทำคนเดียว)
-8. เติม target type `openai_compatible`/`matthew` ใน `selector.py` **และ**
-   `promptfoo_runner._build_config` **และ** เติม input field ที่หายไปใน `ui/app.py`
-9. เปลี่ยน job storage จาก in-memory dict เป็น SQLite ถ้าจะใช้งานจริงจัง
+1. **ยืนยัน `test.Blank` (garak smoke test) ว่าจริงๆ รันได้แม้เป็น 💤**
+2. แก้ `Dockerfile.backend` เพิ่ม Node.js + `npm install -g promptfoo`
+3. จำกัด `rule_types` ให้ `smoke_test_promptmap2()`
+4. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
+5. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
+6. เติม target type `openai_compatible`/`matthew`
+7. เปลี่ยน job storage จาก in-memory dict เป็น SQLite
+8. อัปเดตคู่มือรันทดสอบเทียบ Garak vs Promptfoo (LLM01/02/07/10) ให้ใช้ชื่อ module
+   แทน tag:owasp:llmXX ทุกหมวด และเพิ่ม exploitation/web_injection เข้าคำสั่ง LLM02
+   deep mode ให้ครบ
