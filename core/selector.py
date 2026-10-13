@@ -73,7 +73,21 @@ CATEGORY_DEFAULT_TOOL = {
     "LLM10": "promptfoo",
 }
 
-SUPPORTED_OWASP_CATEGORIES = list(CATEGORY_CAPABLE_TOOLS.keys())
+# 2026-10: scope ของ prototype รอบนี้ — คู่มือทดสอบเทียบ Garak vs Promptfoo (เอกสารทีม)
+# verify ไว้อย่างเป็นระบบแค่ 4 หมวดนี้ (coverage/time/report quality ครบทั้ง 2 tool)
+# ส่วน LLM05/06/09 ยังไม่เคยผ่านการทดสอบเทียบแบบมีขั้นตอนชัดเจนแบบนี้เลย (LLM05 เพิ่งผ่าน
+# dual-category bug ที่ยังไม่ verify กับข้อมูลจริงด้วย — ดู comment ใน owasp_mapping.py)
+#
+# ซ่อนออกจาก prototype ก่อน — ไม่ได้ลบ CATEGORY_CAPABLE_TOOLS/CATEGORY_DEFAULT_TOOL ทิ้ง
+# (ยังอยู่ครบด้านบน) แค่ไม่ให้โผล่ใน SUPPORTED_OWASP_CATEGORIES ที่ /owasp_categories และ
+# run_scan() ใช้เป็นค่า default ตอน user ไม่ได้ระบุ owasp_categories มาเอง — ถ้าจะเปิดกลับมา
+# ทีหลัง แก้ PROTOTYPE_CATEGORIES บรรทัดเดียวพอ (เช่น เพิ่ม "LLM05" กลับเข้า list นี้)
+#
+# หมายเหตุ: นี่คือการซ่อนจาก UI/ค่า default เท่านั้น ถ้า caller ส่ง owasp_categories=["LLM05"]
+# มาตรงๆ ผ่าน API เอง ระบบยังรันให้ได้ปกติ (ไม่ได้ปิดความสามารถ แค่ไม่ชงให้เลือกเฉยๆ)
+PROTOTYPE_CATEGORIES = ["LLM01", "LLM02", "LLM07", "LLM10"]
+
+SUPPORTED_OWASP_CATEGORIES = [c for c in PROTOTYPE_CATEGORIES if c in CATEGORY_CAPABLE_TOOLS]
 
 
 def _env_int(name: str, default: int) -> int:

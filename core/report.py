@@ -32,6 +32,15 @@ library ภายนอกเลย ให้ตรงกับหลักก�
   2. r.get("passed", 0) ไม่กันกรณี key มีอยู่จริงแต่ค่าเป็น None (parser บาง tool
      parse ไม่สำเร็จแล้วส่ง None มา) เปลี่ยนเป็น r.get("passed") or 0 ทุกจุดที่รวมผล
      กันพัง TypeError ตอนบวกเลข
+
+2026-10: เติม OWASP_MITIGATIONS["LLM10"] ที่ขาดไปตั้งแต่ต้น — ไม่ใช่บั๊ก logic ไหน
+แค่ไม่มีใครเขียน entry ของหมวดนี้ใส่ไว้ตอนเพิ่ม LLM10 เข้าระบบ (verify แล้วว่า dict
+เดิมมีครบทุกหมวดยกเว้น LLM10 เท่านั้น ส่วน LLM05 ที่เพิ่มเข้าระบบทีหลัง LLM10 ก็ยัง
+มีครบ แปลว่าไม่ใช่เรื่องลำดับเวลาอย่างเดียว เป็นการตกหล่นเฉพาะหมวดนี้จริงๆ) — เนื้อหา
+อ้างอิงจาก OWASP LLM10:2025 ฉบับทางการ (genai.owasp.org) และผูกกับ concept คู่ที่
+project นี้ใช้ทดสอบจริง (divergence.Repeat = data-leak/model-theft,
+divergence.RepeatedToken = DoS/resource exhaustion) ให้สอดคล้องกับคำเตือนที่มีอยู่
+แล้วใน _CATEGORY_NOTES["LLM10"] ด้านล่าง
 """
 
 import csv
@@ -85,6 +94,18 @@ OWASP_MITIGATIONS = {
         " parameterized query/sandbox เสมอ",
         "ตรวจ output ก่อน render ด้วย allowlist ของ tag/attribute ที่อนุญาต ไม่ใช่ blocklist",
     ],
+    "LLM10": [
+        "จำกัด max_tokens/ความยาว output ต่อ request และตั้ง timeout ของ inference ไว้ชัดเจน"
+        " กัน response ยาวจนวนไม่หยุด",
+        "ทำ rate limiting/throttling ต่อ user หรือ API key กันการยิง request รัวๆ จนเครื่อง"
+        " แย่งทรัพยากรกันหมด (denial-of-wallet/DoS)",
+        "Monitor การใช้ token/compute ที่ผิดปกติ (pattern ซ้ำๆ ที่ทำให้ output ยาวเกินคาด)"
+        " แล้วตัดจบ session อัตโนมัติถ้าเกิน threshold",
+        "แยกพิจารณา 2 ความเสี่ยงที่ถูกรวมอยู่ในหมวดนี้: resource exhaustion/denial-of-wallet"
+        " (แก้ที่ gateway/infra) กับการหลุด memorized data ระหว่างวน repeat (แก้ที่ training"
+        " data/output filtering) — ไม่ใช่ปัญหาเดียวกัน แก้ด้วยวิธีเดียวกันไม่ได้ (ดู"
+        " _CATEGORY_NOTES ด้านล่างประกอบ)",
+    ],
 }
 
 # threshold ตัดสิน verdict ต่อ category — ใช้ค่าเดียวกับ _rate_color ด้านล่างเพื่อให้
@@ -94,8 +115,7 @@ _VERDICT_MID = "ปานกลาง — ควรติดตามและ�
 _VERDICT_BAD = "ควรแก้ไขเร่งด่วน — pass rate ต่ำกว่าเกณฑ์ที่ยอมรับได้"
 
 def _dedupe_probe_stats(results: list[dict]) -> list[dict]:
-    """ใช้เฉพาะตอนคำนวณสรุป — ไม่กระทบตาราง detail
-    (คำอธิบายเต็มดูจากที่ผมส่งให้รอบก่อน)"""
+    """ใช้เฉพาะตอนคำนวณสรุป — ไม่กระทบตาราง detail"""
     grouped: dict[tuple, list[dict]] = defaultdict(list)
     for r in results:
         key = (
@@ -124,12 +144,10 @@ def _summarize_by_owasp(results: list[dict]) -> dict[str, dict]:
     """ผลรวมทุก tool ปนกันต่อ category — ใช้โชว์ headline score รวมเท่านั้น
     ห้ามใช้ตัวเลขจากตรงนี้มาสรุปว่า tool ไหนดีกว่าตัวไหน (ดู
     _summarize_by_category_tool ด้านล่างสำหรับอันนั้น)"""
-    results = _dedupe_probe_stats(results) 
+    results = _dedupe_probe_stats(results)
     summary = defaultdict(lambda: {"pass": 0, "total": 0})
     for r in results:
         cat = r.get("owasp_category") or "Uncategorized"
-        # ใช้ `or 0` แทน .get(key, 0) เพราะ .get แค่กัน key หาย ไม่กันกรณี key มีอยู่
-        # แต่ค่าเป็น None (parser บาง tool parse ไม่สำเร็จแล้วส่ง None มาจริงๆ)
         summary[cat]["pass"] += r.get("passed") or 0
         summary[cat]["total"] += r.get("total") or 0
     return dict(summary)
@@ -137,8 +155,7 @@ def _summarize_by_owasp(results: list[dict]) -> dict[str, dict]:
 
 def _summarize_by_category_tool(results: list[dict]) -> dict[str, dict[str, dict]]:
     """เหมือน _summarize_by_owasp แต่แยกต่อ tool ด้วย — ใช้วาดกราฟเปรียบเทียบ
-    tool ต่อ tool ภายใน category เดียวกัน (ตอบโจทย์ cross-check ที่ตารางสรุปเดิม
-    บวกปนกันจนดูไม่ออก)"""
+    tool ต่อ tool ภายใน category เดียวกัน"""
     results = _dedupe_probe_stats(results)
     summary: dict[str, dict[str, dict]] = defaultdict(lambda: defaultdict(lambda: {"pass": 0, "total": 0}))
     for r in results:
@@ -167,10 +184,10 @@ def _esc(value) -> str:
 
 def _rate_color(rate: float) -> str:
     if rate >= 70:
-        return "#1a7f37"  # green — ป้องกันได้ดี
+        return "#1a7f37"
     if rate >= 40:
-        return "#9a6700"  # เหลือง — กลางๆ
-    return "#cf222e"      # แดง — ป้องกันไม่ค่อยได้
+        return "#9a6700"
+    return "#cf222e"
 
 
 def _rate_verdict(rate: float) -> str:
@@ -182,9 +199,8 @@ def _rate_verdict(rate: float) -> str:
 
 
 def _rate_bar(rate: float) -> str:
-    """bar สีตาม pass rate แนว garak native report — อ่านง่ายกว่าตัวเลขล้วนๆ"""
     color = _rate_color(rate)
-    width = max(rate, 2)  # กัน bar หายไปเลยตอน 0%
+    width = max(rate, 2)
     return (
         '<div class="bar-track">'
         f'<div class="bar-fill" style="width:{width}%; background:{color};"></div>'
@@ -222,19 +238,16 @@ tr:hover td { background: #fafafa; }
 .bar-label { position: absolute; right: 6px; top: 0; line-height: 20px; font-size: 0.78rem;
              font-weight: 600; color: #1a1a1a; }
 
-/* --- TOC --- */
 .toc { background: #f7f7f9; border-radius: 8px; padding: 1rem 1.4rem; margin: 1rem 0; }
 .toc ul { margin: 0.3rem 0; padding-left: 1.2rem; }
 .toc a { color: #0969da; text-decoration: none; }
 .toc a:hover { text-decoration: underline; }
 
-/* --- Tool comparison chart (inline SVG) --- */
 .chart-block { border: 1px solid #e5e5e5; border-radius: 8px; padding: 0.8rem 1.2rem;
                margin: 0.8rem 0; }
 .chart-block h4 { margin: 0 0 0.4rem; }
 .chart-block svg { width: 100%; height: auto; display: block; }
 
-/* --- Recommendation cards --- */
 .rec-card { border-left: 5px solid #ccc; border-radius: 6px; background: #f7f7f9;
             padding: 0.8rem 1.2rem; margin: 0.8rem 0; }
 .rec-card.good { border-left-color: #1a7f37; }
@@ -267,10 +280,6 @@ def _render_toc(has_comparison: bool, has_recommendations: bool, categories: lis
     if has_recommendations:
         optional += '<li><a href="#recommendations">ข้อแนะนำ</a></li>'
 
-    # fix: เดิม <a href="#category-detail">...<ul>{cat_links}</ul></a> ทำให้ <a> ซ้อน
-    # <a> (cat_links แต่ละตัวเป็น <a> อยู่แล้ว) ผิด HTML spec — เบราว์เซอร์จะ
-    # auto-close <a> ตัวนอกทันทีที่เจอ <a> ตัวใน ทำให้ลิงก์ "รายละเอียดต่อ Category"
-    # กดไม่ตรงตามที่ตั้งใจ (DOM จริงไม่ตรงกับที่เขียน) แก้โดยแยก <a> ออกจาก <ul>
     return f"""
     <div class="toc">
       <strong>สารบัญ</strong>
@@ -309,7 +318,6 @@ def _render_summary_table(summary: dict) -> str:
 
 
 def _overall_score(summary: dict) -> str:
-    """headline number รวมทุก category — เผื่ออยากดูภาพรวมไวๆ ก่อนลงรายละเอียด"""
     total_pass = sum(s["pass"] for s in summary.values())
     total_all = sum(s["total"] for s in summary.values())
     rate = _pass_rate(total_pass, total_all)
@@ -341,12 +349,6 @@ def _render_tool_plan_table(tool_plan: dict) -> str:
 
 
 def _svg_comparison_chart(tool_rates: dict[str, dict], chart_w: int = 720) -> str:
-    """วาด bar chart แนวนอน 1 แถวต่อ tool ภายใน category เดียว — ให้เห็นชัดว่า
-    tool ไหน detection/pass rate สูง/ต่ำกว่ากันเท่าไหร่ ไม่ต้องไล่อ่านตัวเลขในตาราง detail
-    เอง (แก้ปัญหาที่ตารางสรุปเดิมบวก pass/total ของทุก tool ปนกันจนดูไม่ออก)
-
-    tool_rates: {"garak": {"pass": 8, "total": 10}, "promptfoo": {"pass": 1, "total": 6}}
-    """
     tools = sorted(tool_rates)
     row_h = 34
     label_w = 130
@@ -357,7 +359,6 @@ def _svg_comparison_chart(tool_rates: dict[str, dict], chart_w: int = 720) -> st
     for i, tool in enumerate(tools):
         s = tool_rates[tool]
         rate = _pass_rate(s["pass"], s["total"])
-        # clamp กัน bar ล้นกรอบถ้าข้อมูลต้นทางผิดปกติจน passed > total (rate > 100)
         rate_clamped = min(rate, 100.0)
         color = _rate_color(rate)
         y = i * row_h + 8
@@ -379,8 +380,6 @@ def _svg_comparison_chart(tool_rates: dict[str, dict], chart_w: int = 720) -> st
 
 
 def _render_tool_comparison(cat_tool_summary: dict[str, dict[str, dict]]) -> str:
-    """ส่วนใหม่: เปรียบเทียบ pass rate ต่อ tool แยกตาม category — ใช้แค่ตอน category
-    นั้นมีมากกว่า 1 tool cross-check กัน (category ที่มี tool เดียวข้ามไป ไม่มีอะไรให้เทียบ)"""
     multi_tool_cats = {
         cat: tools for cat, tools in cat_tool_summary.items() if len(tools) > 1
     }
@@ -442,9 +441,6 @@ def _render_recommendations(summary: dict) -> str:
     """
 
 
-# หมายเหตุเตือนผู้อ่านรายงานที่เคยอยู่แค่ใน comment ของ owasp_mapping.py/แผนเทียบ tool
-# ของทีม เอามาโชว์ในรายงานจริงด้วย (2026-09 รอบเก้า) กันคนอ่านรวมตัวเลขผิดวิธี —
-# ต่อ 1 category เท่านั้น (ไม่ผูกกับ tool/probe ตัวใดตัวหนึ่ง)
 _CATEGORY_NOTES = {
     "LLM02": (
         "⚠️ ตารางนี้รวมหลาย concept ที่ไม่ใช่เมตริกเดียวกัน: leakreplay วัด memorization "
@@ -488,7 +484,6 @@ def _render_category_detail(cat: str, rows: list[dict]) -> str:
             f"<td>{_esc(r.get('detector') or '-')}</td><td>{r.get('passed') or 0}</td>"
             f"<td>{r.get('total') or 0}</td><td>{rate}%</td></tr>"
         )
-        # แถวตัวอย่างที่พัง (ถ้ามี) — วางต่อท้ายแถวผลรวมทันที ใช้ colspan คลุมทั้งตาราง
         examples_html = _render_examples(r.get("failures") or [])
         if examples_html:
             body_rows.append(f'<tr><td colspan="6">{examples_html}</td></tr>')
@@ -509,10 +504,6 @@ def _truncate(text: str, limit: int = 600) -> str:
 
 
 def _render_examples(failures: list[dict]) -> str:
-    """โชว์ตัวอย่าง prompt/response/เหตุผลที่ "พัง" แบบ collapsible ใต้แถวผลรวม —
-    ไม่บังคับเปิดอัตโนมัติ (details ไม่มี open) กันรายงานยาวเกินไปตอนเปิดครั้งแรก
-    ถ้า row ไหนไม่มี failures (เช่น garak ที่ยังไม่ได้เก็บตัวอย่าง) จะคืน "" เฉยๆ
-    ไม่กระทบของเดิม"""
     if not failures:
         return ""
     items = []
@@ -536,12 +527,6 @@ def _render_examples(failures: list[dict]) -> str:
     )
 
 def build_report_html(results: list[dict], tool_plan: dict, target_config: dict) -> str:
-    """สร้าง HTML report เดียวรวมผลทุก tool ที่ถูกเรียกในสแกนรอบนี้
-
-    ใช้ได้ทั้งโชว์ inline ผ่าน st.components.v1.html() และเซฟเป็นไฟล์ .html
-    เปิดตรงๆ ในเบราว์เซอร์ได้เลย (self-contained ไม่มี external asset รวมถึงกราฟที่เป็น
-    inline SVG ล้วนๆ)
-    """
     summary = _summarize_by_owasp(results)
     cat_tool_summary = _summarize_by_category_tool(results)
     grouped = _group_by_owasp(results)
@@ -600,9 +585,6 @@ def build_report_html(results: list[dict], tool_plan: dict, target_config: dict)
 
 
 def build_report_csv(results: list[dict]) -> str:
-    """CSV แบบแบน (1 แถว = 1 ผล test) เปิดด้วย Excel/Google Sheets ได้เลย
-    คอลัมน์: owasp_category, tool, probe, detector, passed, total, pass_rate
-    """
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["owasp_category", "tool", "probe", "detector", "passed", "total", "pass_rate"])
@@ -626,12 +608,6 @@ def save_reports(
     output_dir: Path,
     target_config: dict,
 ) -> dict[str, Path]:
-    """เซฟ .html (unified report), .json (raw + summary) และ .csv (แบนๆ เปิดใน Excel
-    ได้) ลง output_dir ของสแกนรอบนี้ (เช่น results/<scan_id>/) — เรียกจาก selector.run_scan()
-
-    คืนค่า dict path ของไฟล์ที่เซฟ เผื่ออยาก link/แสดงต่อ (ตอนนี้ selector.py
-    ไม่ได้ใช้ return value นี้ แค่เรียกเฉยๆ แต่เผื่อ caller อื่นในอนาคต)
-    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

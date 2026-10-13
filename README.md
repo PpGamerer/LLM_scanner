@@ -1,4 +1,4 @@
-# LLM Security Scanner — โครง starter
+# LLM Vulnerability Scanning Platform
 
 โครงตามสถาปัตยกรรม 3 ชั้น: **Core Engine (Python)** → **API (FastAPI)** → **UI (Streamlit)** → **Docker Compose**
 
@@ -166,6 +166,11 @@ generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่
 - แก้ bug ที่ `owasp:llm:01` เคยขยายเป็น 28 sub-plugin ไม่ใช่ 1 test อย่างที่ตั้งใจ
   (default strategies ของ promptfoo คูณเข้าไปเองด้วย) — เติม `"strategies": []` ใน
   `_build_config()` แล้ว + smoke test เปลี่ยนเป็น plugin เดี่ยวแทน preset
+- **เซฟ HTML report คู่กับ JSON แล้ว** (`promptfoo_runner.py` ส่ง `-o` 2 ตัวในคำสั่งเดียว):
+  ได้ `results/<scan_id>/promptfoo_scan_<model>.html` ไว้เปิดดูใน browser (pass/fail ต่อ
+  plugin, prompt/response เทียบกัน) เหมือน `*.report.html` ของ garak — เป็นไฟล์เสริม
+  `promptfoo_parser.py` ยัง parse จาก `.json` เท่านั้น ไม่แตะ `.html` ⚠️ ยังไม่ verify กับ
+  การรันจริงว่า promptfoo เวอร์ชันที่ลงรับ `-o` ซ้ำ 2 ตัวและเขียนทั้งสองไฟล์ครบ
 - `system_prompt_path` เดียวกับที่ promptmap2 ใช้ ถูก reuse ให้ promptfoo's
   `prompt-extraction` plugin ด้วย (ผ่าน `_resolve_system_prompt_file` ที่ import มาจาก
   `promptmap2_runner.py` ตรงๆ ไม่เขียนซ้ำ) — ไม่ต้องเพิ่ม field ใหม่ใน UI
@@ -220,8 +225,15 @@ Ollama ไม่ตอบ) job จะแขวนไม่มีวันจบ�
 ต่างจาก family เปล่าๆ จริงหรือเปล่า** ควรรัน smoke test จริงสักรอบแล้วเช็ค error log
 ก่อนเชื่อ 100%
 
+**บั๊กเล็กใน `smoke_test.py` ที่ยังไม่แก้** (อ่านจากโค้ด ไม่กระทบการรัน แต่ทำให้ข้อความ
+สับสน): (1) `smoke_test_garak()` รายงานว่า "(probe: dan)" ทั้งที่ probe จริงคือ `test.Blank`
+(2) `__main__` มี mock `tool_plan` hardcode (promptfoo ใต้ LLM01/02/09 ฯลฯ) ที่ไม่ตรงกับ
+`CATEGORY_DEFAULT_TOOL` ปัจจุบัน และไม่มี LLM05/LLM10 — แค่ตัวอย่างโชว์โครงสร้าง ไม่ได้ถูก
+ใช้ตัดสินอะไร
+
 **บั๊กที่รู้แล้วแต่ยังไม่แก้**: `smoke_test_promptmap2()` ไม่ได้ส่ง `rule_types` เลย ทำให้
-promptmap2 รันทุก rule ทุก type แทนที่จะเบาจริงๆ อย่างที่ตั้งใจ — นี่คือสาเหตุที่เคยชน
+promptmap2 รันทุก rule ทุก type (ยืนยันจากผลจริงแล้ว: smoke test รอบล่าสุดได้ 37 rule ใน
+output json ไม่ใช่ rule เดียว) แทนที่จะเบาจริงๆ อย่างที่ตั้งใจ — นี่คือสาเหตุที่เคยชน
 timeout 600s มาก่อน (ตอนนี้ปิด timeout ไปแล้วเลยไม่ error แต่ก็ยังช้ากว่าที่ควรอยู่ดี)
 
 ## โครงสร้างไฟล์
@@ -230,6 +242,11 @@ timeout 600s มาก่อน (ตอนนี้ปิด timeout ไปแ�
 llm_scanner/
 ├── core/
 │   ├── generators/base.py       # target adapter (Ollama, OpenAI-compatible, Matthew)
+│   │                             # ⚠️ ยังไม่ถูกใช้งานจริง: ไม่มีไฟล์ไหนที่อัปโหลดมา (selector/
+│   │                             #   runners/smoke_test/app) import `build_generator` เลย — ทั้ง 3
+│   │                             #   tool รับแค่ชื่อโมเดล Ollama แล้วเรียกเองผ่าน CLI ของตัวเอง
+│   │                             #   (เหลือ api/main.py ที่ยังไม่ได้เช็ค) เก็บไว้เป็นโครงสำหรับ
+│   │                             #   target type อื่นในอนาคต
 │   ├── runners/
 │   │   ├── garak_runner.py      # เรียก Garak (external tool)
 │   │   ├── promptmap2_runner.py # เรียก promptmap2 (external tool) — opt-in เท่านั้น
@@ -321,8 +338,10 @@ llm_scanner/
 - ✅ **Unified HTML report ดึงจากไฟล์จริงแล้ว** — เพิ่ม `GET /scan/{job_id}/report/html`
   ให้ UI ดึงไฟล์ที่เซฟไว้จริงบน `results/<scan_id>/report.html` ตรงๆ แทนการ
   `build_report_html()` ใหม่ใน memory ทุกครั้ง (กันปัญหา stale-import/backend restart
-  แล้วหา report เก่าไม่เจอ) — `ui/app.py` ยังมีปุ่มแบบเดิม (build ใน memory + download
-  button) คู่กันไว้ด้วยเผื่ออยากดูแบบ inline เร็วๆ โดยไม่โหลดไฟล์
+  แล้วหา report เก่าไม่เจอ) — `ui/app.py` ตอนนี้ดึง HTML จาก endpoint นี้อย่างเดียว
+  (โชว์ inline + ปุ่มดาวน์โหลด) **ไม่ได้ build HTML ใน memory อีกแล้ว** เหลือที่ build ฝั่ง
+  UI แค่ CSV ผ่าน `build_report_csv()` (ปุ่ม "CSV ทุกแถว") ซึ่งยัง import `core.report` ตรงๆ
+  — ถ้า import ไม่ได้ ปุ่มนี้จะหายไปเงียบๆ (`REPORT_AVAILABLE=False`)
 - ✅ **`report.py`/`ui/app.py` วน loop ผ่าน `tool_plan`/`results` แบบ generic** —
   ไม่ hardcode ชื่อ tool เลย เพิ่ม tool ใหม่ (promptfoo) โดยไม่ต้องแตะโค้ดส่วนแสดงผลเลย
 - ✅ **Smoke test** — ยิงสแกนจริงขนาดจิ๋ว (garak, promptmap2, promptfoo) ก่อนสแกนเต็ม
@@ -398,7 +417,8 @@ python -m core.smoke_test
 
 1. **ยืนยัน `test.Blank` (garak smoke test) ว่าจริงๆ รันได้แม้เป็น 💤**
 2. แก้ `Dockerfile.backend` เพิ่ม Node.js + `npm install -g promptfoo`
-3. จำกัด `rule_types` ให้ `smoke_test_promptmap2()`
+3. จำกัด `rule_types` ให้ `smoke_test_promptmap2()` (+ แก้ข้อความ "probe: dan" และ mock
+   `tool_plan` ใน `smoke_test.py`)
 4. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
 5. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
 6. เติม target type `openai_compatible`/`matthew`

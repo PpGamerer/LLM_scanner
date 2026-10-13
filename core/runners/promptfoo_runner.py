@@ -1,51 +1,67 @@
 """
-runners/promptfoo_runner.py — เรียก Promptfoo (external tool, Node.js) ผ่าน subprocess
+runners/promptfoo_runner.py
 
-ต่างจาก garak/promptmap2 (Python, เรียกผ่าน venv python.exe ตรงๆ) ตรงที่ Promptfoo
-เป็น Node.js CLI ติดตั้งแยกจาก python venv ของโปรเจกต์นี้โดยสิ้นเชิง — ต้องมี Node.js
-+ npm บนเครื่อง (หรือใน container ของ backend) แล้วติดตั้งด้วยหนึ่งในสองทาง:
+เรียก Promptfoo (external Node.js CLI) ผ่าน subprocess
 
-    npm install -g promptfoo
-    # หรือถ้าไม่อยากติดตั้ง global (ช้ากว่าตอนแรกเพราะต้องดาวน์โหลด แต่ไม่ต้อง npm install -g):
-    #   set PROMPTFOO_USE_NPX=1
+ข้อกำหนด:
+    - ติดตั้ง Node.js และ npm
+    - ติดตั้ง Promptfoo ด้วย:
+          npm install -g promptfoo
 
-ถ้าจะรันผ่าน Docker: ต้องเพิ่ม Node.js เข้า Dockerfile.backend เอง (ไฟล์นี้ไม่ได้ถูก
-อัปโหลดมาด้วยตอนที่เขียน runner นี้ เลยไม่ได้แก้ให้ตรงนี้ — อย่างน้อยต้องมีบรรทัดทำนอง
-`RUN apt-get install -y nodejs npm && npm install -g promptfoo` เพิ่มเข้าไป)
+      หรือกำหนด PROMPTFOO_USE_NPX=1 เพื่อใช้ npx
 
-Promptfoo เป็น config-driven (ไม่ใช่ CLI flag ล้วนแบบ garak) — flow คือ:
-    1. generate ไฟล์ YAML config ตาม plugin ที่ต้องการ (ฟังก์ชัน _build_config ด้านล่าง)
-    2. เรียก `promptfoo redteam run -c <config>.yaml -o <output>.json --no-cache`
-       (คำสั่งนี้ตาม official doc ที่อ่านมา รวม generate testcase + eval ในคำสั่งเดียว)
-    3. parse ผลจาก output json (promptfoo_parser.py)
+Flow:
+    1. สร้าง Promptfoo config YAML
+    2. เรียก `promptfoo redteam generate` เพื่อสร้าง test cases
+       และบันทึกเป็นไฟล์ YAML แยกต่างหาก
+    3. เรียก `promptfoo redteam eval` เพื่อประเมินผล
+       และบันทึกทั้ง JSON และ HTML
+    4. ส่ง JSON ให้ parse_promptfoo_report()
 
-⚠️ เหมือน promptmap2_parser.py ตอนที่เพิ่งเขียนใหม่ๆ: **flow นี้เขียนตาม official doc
-ยังไม่เคยรันจริงบนเครื่องที่มี promptfoo ติดตั้งอยู่จริง** ก่อนใช้งานจริงต้อง:
-    1. รัน `promptfoo --version` เช็คว่าติดตั้งสำเร็จ
-    2. รัน `promptfoo redteam run --help` เทียบชื่อ flag ในนี้ (โดยเฉพาะ -o/--no-cache
-       ที่อาจเปลี่ยนชื่อไปตามเวอร์ชัน)
-    3. รัน scan เล็กๆ 1 plugin แล้วเปิดไฟล์ output.json ดูโครงสร้างจริงเทียบกับที่
-       promptfoo_parser.py สมมติไว้ — ถ้าไม่ตรง parser จะ raise KeyError พร้อม list
-       key ที่เจอจริงให้ debug ต่อได้เร็ว (ดู comment ใน promptfoo_parser.py)
+ไฟล์ผลลัพธ์:
+    promptfoo_config_<model>.yaml
+        Config เริ่มต้นของ Promptfoo
+
+    promptfoo_redteam_<model>.yaml
+        Config ที่มี test cases ซึ่ง generate แล้ว
+
+    promptfoo_scan_<model>.json
+        ผลการประเมินสำหรับ parser
+
+    promptfoo_scan_<model>.html
+        รายงาน HTML สำหรับเปิดดูใน browser
+
+    promptfoo_generate_<model>.log
+        Log ของขั้น generate กรณีมีข้อผิดพลาด
+
+    promptfoo_run_<model>.log
+        Log ของขั้น eval กรณีมีข้อผิดพลาด
+
+หมายเหตุ:
+    - ใช้ `redteam generate` และ `redteam eval` แยกกัน
+      เพื่อไม่ให้ path ของรายงาน HTML ถูกส่งไปเป็น config
+    - ใช้ --no-cache เพื่อหลีกเลี่ยงผลเก่าจาก cache
+    - ปิด telemetry และปิด stdin เพื่อป้องกัน CLI ค้างรอ input
+    - target และ grader ใช้ Ollama ตาม config ที่กำหนด
 """
 
+import json
 import os
 import shutil
 import subprocess
 from pathlib import Path
 
-import yaml  # ต้องเพิ่ม pyyaml เข้า requirements-backend.txt (ดูไฟล์ที่แก้คู่กัน)
+import yaml
+
 
 from ..parsers.promptfoo_parser import parse_promptfoo_report
-from .promptmap2_runner import _resolve_system_prompt_file  # เหตุผลที่ reuse ดูใน
-# docstring ของ run_promptfoo_scan ด้านล่าง — ไม่อยากมี logic หา system prompt file
-# ซ้ำสองที่ (owasp_mapping.py เตือนเรื่องนี้ไว้แล้วว่า "ไฟล์เดียว แก้ที่เดียว")
+from .promptmap2_runner import _resolve_system_prompt_file
+
 
 _CURRENT_FILE = Path(__file__).resolve()
 _PROJECT_ROOT = _CURRENT_FILE.parents[1]
 
-# ไฟล์ผลสแกนรวมไว้ที่ results/ เดียวกับ garak/promptmap2 (ดู garak_runner.py/
-# promptmap2_runner.py — ถ้าจะย้ายทีหลัง ต้องแก้ทั้ง 3 ไฟล์พร้อมกัน)
+# เก็บผลไว้ใน results/ เช่นเดียวกับ runner ตัวอื่น
 RESULTS_DIR = _PROJECT_ROOT / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -53,16 +69,16 @@ USE_NPX = os.environ.get("PROMPTFOO_USE_NPX", "0") == "1"
 
 
 def _resolve_promptfoo_bin() -> list[str]:
-    """คืนค่าเป็น list ของคำสั่งฐาน (ไม่ใช่ str เดียวแบบ PYTHON_BIN ของ garak/promptmap2)
-    เพราะถ้าใช้ npx จะเป็นคำสั่ง 2 ท่อน (["npx", "promptfoo@latest"]) ส่วนติดตั้ง global
-    เป็นคำสั่งเดียว (["promptfoo"] หรือ path เต็มที่ระบุผ่าน PROMPTFOO_PATH)
+    """
+    คืนค่า command สำหรับเรียก Promptfoo
 
-    ลำดับการหา (เหมือน _resolve_promptmap2_script ใน promptmap2_runner.py):
-      1. env var PROMPTFOO_PATH ถ้ามี — ใช้ path นี้ตรงๆ
-      2. PROMPTFOO_USE_NPX=1 — ใช้ npx (ไม่ต้องติดตั้ง global แต่ช้ากว่ารอบแรก)
-      3. shutil.which("promptfoo") — หาจาก PATH ปกติ (กรณี npm install -g มาแล้ว)
+    ลำดับการเลือก:
+        1. PROMPTFOO_PATH
+        2. PROMPTFOO_USE_NPX=1 -> npx promptfoo@latest
+        3. promptfoo ที่อยู่ใน PATH
     """
     env_path = os.environ.get("PROMPTFOO_PATH")
+
     if env_path:
         return [env_path]
 
@@ -70,13 +86,15 @@ def _resolve_promptfoo_bin() -> list[str]:
         return ["npx", "promptfoo@latest"]
 
     found = shutil.which("promptfoo")
+
     if found:
         return [found]
 
     raise FileNotFoundError(
-        "หา promptfoo CLI ไม่เจอ — ติดตั้งด้วย `npm install -g promptfoo` ก่อน หรือ set "
-        "env var PROMPTFOO_USE_NPX=1 เพื่อใช้ `npx promptfoo@latest` แทน หรือ set "
-        "PROMPTFOO_PATH ชี้ไปที่ binary ตรงๆ"
+        "หา Promptfoo CLI ไม่เจอ\n"
+        "ติดตั้งด้วย `npm install -g promptfoo` หรือกำหนด "
+        "PROMPTFOO_USE_NPX=1 เพื่อใช้ npx หรือกำหนด PROMPTFOO_PATH "
+        "ให้ชี้ไปยัง executable ของ Promptfoo"
     )
 
 
@@ -88,31 +106,36 @@ def _build_config(
     system_prompt: str | None,
     grader_model: str | None = None,
 ) -> dict:
-    """สร้าง dict ที่แปลงเป็น promptfooconfig.yaml
-    ...(docstring เดิม)...
-
-    grader_model: โมเดลที่ใช้ตัดสิน pass/fail (redteam.provider) แยกจาก target
-    (model_name) — ถ้าไม่ระบุ (None) fallback ไปใช้ target model ตัวเดียวกันเหมือนเดิม
-    (พฤติกรรมเดิม 100%) 2026-09 (รอบหก): พบจากข้อมูลจริงว่าให้ target model เล็ก
-    (1B, abliterated) ตัดสินคำตอบของตัวเองเองมีปัญหา — grader ตอบไม่เป็น JSON ที่
-    parse ได้ ("Could not extract JSON from llm-rubric response") หรือ timeout
-    รวมกันเฉลี่ย ~6% ของทุกแถว สูงสุด 20% ใน divergent-repetition (LLM10) — แถวพวกนี้
-    ถูกนับเป็น fail อัตโนมัติทั้งที่ไม่รู้ว่า target จริงๆ ทำถูกหรือผิด (false negative
-    ปนอยู่ใน pass rate โดยไม่มีใครรู้) แก้โดยให้ใช้โมเดล local อีกตัว (เช่น dolphin3)
-    เป็น grader แทน ยังคง local-only ไม่ต้องมี OPENAI_API_KEY เหมือนที่ตั้งใจไว้แต่แรก
     """
-    grading_provider = f"ollama:chat:{grader_model or model_name}"
+    สร้าง Promptfoo config
+
+    model_name:
+        ชื่อโมเดลเป้าหมายบน Ollama
+
+    grader_model:
+        โมเดลที่ใช้ประเมิน pass/fail
+        หากไม่ระบุ จะใช้โมเดลเดียวกับ target
+    """
+    grading_model = grader_model or model_name
+    grading_provider = f"ollama:chat:{grading_model}"
 
     config: dict = {
         "targets": [
-            {"id": f"ollama:chat:{model_name}", "config": {"apiBaseUrl": ollama_url}}
+            {
+                "id": f"ollama:chat:{model_name}",
+                "config": {
+                    "apiBaseUrl": ollama_url,
+                },
+            }
         ],
         "redteam": {
-            # ถ้า grader_model ระบุมา (ต่างจาก target) ส่งเป็น object พร้อม config.apiBaseUrl
-            # เอง (โมเดล grader อยู่บน ollama server เดียวกับ target — คนละโมเดล คนละ id)
-            # ถ้าไม่ระบุ fallback เป็น string เดิม (พฤติกรรมเดิมเป๊ะ ไม่กระทบ caller เก่า)
             "provider": (
-                {"id": grading_provider, "config": {"apiBaseUrl": ollama_url}}
+                {
+                    "id": grading_provider,
+                    "config": {
+                        "apiBaseUrl": ollama_url,
+                    },
+                }
                 if grader_model and grader_model != model_name
                 else grading_provider
             ),
@@ -122,88 +145,53 @@ def _build_config(
         },
     }
 
-    # LLM07 (prompt-extraction) ต้องมี systemPrompt ระบุไว้ใน config ของ plugin นั้นเอง
-    # ไม่ใช่ top-level ของไฟล์ (ดู owasp_mapping.PROMPTFOO_PLUGIN_OWASP_MAP ที่ผูก
-    # "prompt-extraction" ไว้กับ LLM07) — ถ้าไม่มี system_prompt (หา system prompt file
-    # ไม่เจอ) ปล่อยให้ plugin นี้รันแบบไม่มี systemPrompt ไปก่อน (มีแค่ warning พิมพ์ออกมา
-    # ไม่ raise) เพราะไม่อยากให้ plugin เดียวทำให้ scan ทั้งก้อนพังหมด
+    # LLM07: prompt-extraction ต้องมี systemPrompt ใน plugin config
     if "prompt-extraction" in plugins and system_prompt:
         config["redteam"]["plugins"] = [
-            {"id": "prompt-extraction", "config": {"systemPrompt": system_prompt}}
-            if p == "prompt-extraction" else p
-            for p in plugins
+            (
+                {
+                    "id": "prompt-extraction",
+                    "config": {
+                        "systemPrompt": system_prompt,
+                    },
+                }
+                if plugin == "prompt-extraction"
+                else plugin
+            )
+            for plugin in plugins
         ]
 
     return config
 
 
-def run_promptfoo_scan(
-    model_name: str,
-    plugins: list[str] | None,
-    ollama_url: str = "http://localhost:11434",
-    system_prompt_path: str = "system-prompt.txt",
-    num_tests: int = 5,
-    grader_model: str | None = None,   # <-- เพิ่มบรรทัดนี้ (default None = พฤติกรรมเดิม)
-    timeout_sec: int | None = 7200,
-    output_dir: Path | None = None,
-) -> list[dict]:
-    """เหมือน run_garak_scan/run_promptmap2_scan — plugins=None หรือ [] คือ "ไม่ต้องรันเลย"
-    (pattern เดียวกับที่แก้ไว้ใน garak_runner.py กัน [] ถูกตีความเหมือน None แล้ว
-    fallback ไปยิง preset — ที่นี่เช็คด้วย `not plugins` ตรงๆ ไม่มี preset ให้ fallback อยู่แล้ว)
+def _tail(value: str | bytes | None, limit: int = 1500) -> str:
+    """แปลง subprocess output เป็นข้อความและคืนเฉพาะส่วนท้าย."""
+    if value is None:
+        return ""
 
-    system_prompt_path: ใช้ logic เดียวกับ promptmap2_runner._resolve_system_prompt_file
-    (reuse ตรงๆ ไม่เขียนซ้ำ) เพื่อหา system prompt สำหรับ plugin "prompt-extraction"
-    (LLM07) — ถ้าหาไม่เจอเลย (ทั้งไฟล์ที่ระบุเอง, ไฟล์จาก repo promptmap2, และดึงจาก
-    Ollama /api/show ไม่ได้) จะ warn เฉยๆ ไม่ raise เพราะ plugin อื่นๆ ที่ไม่ใช่
-    prompt-extraction ยังรันได้ปกติ
-    grader_model: โมเดลแยกสำหรับตัดสิน pass/fail — ไม่ระบุ = ใช้ model_name ตัวเดียวกัน
-    เหมือนเดิม (ดูเหตุผลเต็มใน _build_config)
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+
+    return value[-limit:]
+
+
+def _run_command(
+    cmd: list[str],
+    timeout_sec: int | None,
+) -> subprocess.CompletedProcess:
     """
-    if not plugins:
-        return []
+    เรียก subprocess โดยปิด stdin และ telemetry
 
-    system_prompt = None
-    try:
-        system_prompt_file = _resolve_system_prompt_file(model_name, ollama_url, system_prompt_path)
-        system_prompt = system_prompt_file.read_text(encoding="utf-8")
-    except (FileNotFoundError, RuntimeError) as exc:
-        if "prompt-extraction" in plugins:
-            print(
-                f"[promptfoo_runner] หา system prompt ไม่เจอ ({exc}) — plugin "
-                "'prompt-extraction' (LLM07) จะรันแบบไม่มี systemPrompt กำกับ "
-                "ผลอาจไม่แม่นเท่าที่ควร"
-            )
-
-    safe_model = model_name.replace(":", "_").replace("/", "_")
-    target_dir = output_dir or RESULTS_DIR
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    config_path = (target_dir / f"promptfoo_config_{safe_model}.yaml").resolve()
-    output_path = (target_dir / f"promptfoo_scan_{safe_model}.json").resolve()
-
-    config = _build_config(model_name, ollama_url, plugins, num_tests, system_prompt, grader_model)
-    config_path.write_text(
-        yaml.safe_dump(config, allow_unicode=True, sort_keys=False), encoding="utf-8"
-    )
-
-    base_cmd = _resolve_promptfoo_bin()
-    cmd = base_cmd + [
-        "redteam", "run",
-        "-c", str(config_path),
-        "-o", str(output_path),
-        "--no-cache",  # กัน promptfoo cache ผลเก่าไว้แล้วคืนผลเดิมซ้ำ (สำคัญมากตอน
-                        # เทียบผลข้าม guard-level เพราะ prompt เดียวกันอาจถูกยิงซ้ำ
-                        # ด้วย system prompt คนละแบบ)
-    ]
-
-    # promptfoo redteam ถามอีเมล (telemetry/lead-capture prompt) ถ้าไม่ปิดไว้ — พอเรียก
-    # ผ่าน subprocess.run(capture_output=True) prompt นั้นจะถูกดักไปอยู่ใน stdout pipe
-    # เงียบๆ ไม่มีวันโผล่ให้เห็น แต่ตัว subprocess ยังค้างรอ stdin ตลอดกาล (ไม่ error ไม่
-    # timeout เพราะปิด timeout ไว้) — นี่คือสาเหตุจริงที่ "หยุดเอง" เจอตอน debug
-    env = {**os.environ, "PROMPTFOO_DISABLE_TELEMETRY": "true"}
+    ไม่แสดง output ระหว่างรัน เพราะ subprocess ใช้ capture_output
+    แต่จะส่ง stdout/stderr กลับให้ caller เพื่อบันทึก log ได้
+    """
+    env = {
+        **os.environ,
+        "PROMPTFOO_DISABLE_TELEMETRY": "true",
+    }
 
     try:
-        result = subprocess.run(
+        return subprocess.run(
             cmd,
             capture_output=True,
             text=True,
@@ -212,37 +200,290 @@ def run_promptfoo_scan(
             encoding="utf-8",
             errors="replace",
             env=env,
-            stdin=subprocess.DEVNULL,  # กัน promptfoo ค้างรอ input (เช่น email
-                                       # prompt) เงียบๆ ตามที่ comment ด้านบนเตือนไว้ —
-                                       # DEVNULL ทำให้มันเจอ EOF ทันทีแทนที่จะ inherit
-                                       # stdin จาก parent ซึ่งไม่มี terminal จริงตอนรัน
-                                       # ผ่าน FastAPI background task
+            stdin=subprocess.DEVNULL,
+            check=False,
         )
+
     except subprocess.TimeoutExpired as exc:
-        stdout_tail = (exc.stdout or "")[-1000:]
-        stderr_tail = (exc.stderr or "")[-1000:]
         raise RuntimeError(
-            f"Promptfoo scan timed out หลัง {timeout_sec}s\n"
-            f"--- Last STDOUT ---\n{stdout_tail}\n"
-            f"--- Last STDERR ---\n{stderr_tail}"
+            f"Promptfoo command timed out หลัง {timeout_sec} วินาที\n"
+            f"Command: {' '.join(cmd)}\n"
+            f"--- STDOUT (tail) ---\n{_tail(exc.stdout)}\n"
+            f"--- STDERR (tail) ---\n{_tail(exc.stderr)}"
         ) from exc
 
-    if result.returncode != 0 and not output_path.exists():
-    # promptfoo redteam ใช้ exit code สื่อผล pass/fail ของ target model เอง
-    # (เจอจริง: exit 100 ตอน target สอบตกทุก test) ไม่ใช่ตัวโปรแกรม crash — เพราะงั้น
-    # เช็ค returncode!=0 เฉยๆ ไม่พอ ต้องเช็คคู่กับว่ามี output file จริงไหม ถ้ามีไฟล์
-    # output แปลว่าสแกนรันจบสมบูรณ์แล้ว (ต่อให้ target สอบตกทุกข้อ) ให้ผ่านไป parse
-    # ผลตามปกติ ไม่ raise ที่นี่
-        raise RuntimeError(
-            f"promptfoo scan failed (exit {result.returncode})\n"
-            f"--- STDOUT (tail) ---\n{result.stdout[-2000:]}\n"
-            f"--- STDERR (tail) ---\n{result.stderr[-2000:]}"
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"ไม่สามารถเรียก Promptfoo executable ได้\n"
+            f"Command: {' '.join(cmd)}\n"
+            "ตรวจสอบ Node.js, npm, PATH และ PROMPTFOO_PATH"
+        ) from exc
+
+
+def _run_stage(
+    cmd: list[str],
+    timeout_sec: int | None,
+    log_path: Path,
+    stage_name: str,
+    allowed_exit_codes: tuple[int, ...] = (0,),
+) -> subprocess.CompletedProcess:
+    """รัน Promptfoo stage และตรวจสอบ exit code ที่อนุญาต."""
+
+    try:
+        result = _run_command(cmd, timeout_sec)
+
+    except (RuntimeError, FileNotFoundError) as exc:
+        log_path.write_text(
+            f"Stage: {stage_name}\n"
+            f"Command: {' '.join(cmd)}\n\n"
+            f"ERROR:\n{exc}\n",
+            encoding="utf-8",
+        )
+        raise
+
+    if result.returncode not in allowed_exit_codes:
+        log_path.write_text(
+            f"Stage: {stage_name}\n"
+            f"Command: {' '.join(cmd)}\n"
+            f"Exit code: {result.returncode}\n\n"
+            f"--- STDOUT ---\n{result.stdout}\n\n"
+            f"--- STDERR ---\n{result.stderr}\n",
+            encoding="utf-8",
         )
 
-    if not output_path.exists():
-        raise FileNotFoundError(
-            f"หา promptfoo output ไม่เจอ: {output_path}\n"
-            f"--- Console ---\n{result.stdout[-1500:]}"
+        raise RuntimeError(
+            f"Promptfoo {stage_name} failed "
+            f"(exit {result.returncode})\n"
+            f"Log เต็ม: {log_path}\n"
+            f"--- STDOUT (tail) ---\n{_tail(result.stdout)}\n"
+            f"--- STDERR (tail) ---\n{_tail(result.stderr)}"
         )
+
+    return result
+
+
+def run_promptfoo_scan(
+    model_name: str,
+    plugins: list[str] | None,
+    ollama_url: str = "http://localhost:11434",
+    system_prompt_path: str = "system-prompt.txt",
+    num_tests: int = 5,
+    grader_model: str | None = None,
+    timeout_sec: int | None = 7200,
+    output_dir: Path | None = None,
+) -> list[dict]:
+    """
+    รัน Promptfoo red-team scan และคืนผลที่ parse จาก JSON
+
+    plugins=None หรือ [] หมายถึงไม่ต้องรัน scan และคืน [] ทันที
+
+    system_prompt_path:
+        ตำแหน่ง system prompt ที่ใช้กับ prompt-extraction
+        ใช้ resolver ตัวเดียวกับ promptmap2_runner
+
+    grader_model:
+        โมเดล Ollama ที่ใช้ประเมินผล
+        หากไม่ระบุจะใช้ model_name
+
+    timeout_sec:
+        timeout สำหรับแต่ละ subprocess stage
+
+    output_dir:
+        โฟลเดอร์เก็บ config, logs และผลลัพธ์
+    """
+    if not plugins:
+        return []
+
+    # ---------------------------------------------------------
+    # 1. Resolve system prompt (ใช้ logic ร่วมกับ promptmap2)
+    # ---------------------------------------------------------
+    system_prompt = None
+
+    try:
+        system_prompt_file = _resolve_system_prompt_file(
+            model_name,
+            ollama_url,
+            system_prompt_path,
+        )
+        system_prompt = system_prompt_file.read_text(encoding="utf-8")
+
+    except (FileNotFoundError, RuntimeError) as exc:
+        if "prompt-extraction" in plugins:
+            print(
+                "[promptfoo_runner] หา system prompt ไม่เจอ "
+                f"({exc}) — plugin 'prompt-extraction' (LLM07) "
+                "จะรันโดยไม่มี systemPrompt กำกับ "
+                "ผลอาจไม่แม่นเท่าที่ควร"
+            )
+
+    # ---------------------------------------------------------
+    # 2. เตรียม paths
+    # ---------------------------------------------------------
+    safe_model = (
+        model_name
+        .replace(":", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+    )
+
+    target_dir = Path(output_dir) if output_dir else RESULTS_DIR
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    config_path = (
+        target_dir / f"promptfoo_config_{safe_model}.yaml"
+    ).resolve()
+
+    # Config ที่ generate test cases แล้ว ต้องเป็น YAML
+    redteam_config_path = (
+        target_dir / f"promptfoo_redteam_{safe_model}.yaml"
+    ).resolve()
+
+    # JSON ใช้กับ parser; HTML ใช้เปิดรายงานใน browser
+    output_path = (
+        target_dir / f"promptfoo_scan_{safe_model}.json"
+    ).resolve()
+
+    html_report_path = (
+        target_dir / f"promptfoo_scan_{safe_model}.html"
+    ).resolve()
+
+    generate_log_path = (
+        target_dir / f"promptfoo_generate_{safe_model}.log"
+    ).resolve()
+
+    eval_log_path = (
+        target_dir / f"promptfoo_run_{safe_model}.log"
+    ).resolve()
+
+    # ---------------------------------------------------------
+    # 3. เขียน config เริ่มต้น
+    # ---------------------------------------------------------
+    config = _build_config(
+        model_name=model_name,
+        ollama_url=ollama_url,
+        plugins=plugins,
+        num_tests=num_tests,
+        system_prompt=system_prompt,
+        grader_model=grader_model,
+    )
+
+    config_path.write_text(
+        yaml.safe_dump(
+            config,
+            allow_unicode=True,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    # ---------------------------------------------------------
+    # 4. Resolve Promptfoo executable
+    # ---------------------------------------------------------
+    base_cmd = _resolve_promptfoo_bin()
+
+    # ลบผลเก่าก่อนเริ่ม เพื่อไม่ให้เผลออ่านไฟล์จาก scan ก่อนหน้า
+    for path in (
+        redteam_config_path,
+        output_path,
+        html_report_path,
+    ):
+        if path.exists():
+            path.unlink()
+
+    # ---------------------------------------------------------
+    # 5. Generate test cases
+    #
+    # สำคัญ:
+    # - -o ขั้นนี้ต้องชี้ไปยัง YAML config
+    # - ห้ามใช้ html_report_path ในขั้น generate
+    # ---------------------------------------------------------
+    generate_cmd = base_cmd + [
+        "redteam",
+        "generate",
+        "-c",
+        str(config_path),
+        "-o",
+        str(redteam_config_path),
+        "--no-cache",
+    ]
+
+    generate_result = _run_stage(
+        cmd=generate_cmd,
+        timeout_sec=timeout_sec,
+        log_path=generate_log_path,
+        stage_name="generate",
+    )
+
+    if not redteam_config_path.is_file():
+        raise FileNotFoundError(
+            "Promptfoo generate จบโดยไม่มี error "
+            "แต่ไม่พบไฟล์ config ที่สร้างขึ้น\n"
+            f"Expected: {redteam_config_path}\n"
+            f"--- STDOUT (tail) ---\n"
+            f"{_tail(generate_result.stdout)}\n"
+            f"--- STDERR (tail) ---\n"
+            f"{_tail(generate_result.stderr)}"
+        )
+
+    # ---------------------------------------------------------
+    # 6. Evaluate test cases
+    #
+    # ใช้ redteam eval กับ generated YAML
+    # -o JSON และ -o HTML เป็น output ของการประเมิน
+    # ไม่ใช่ config input
+    # ---------------------------------------------------------
+    eval_cmd = base_cmd + [
+        "redteam",
+        "eval",
+        "-c",
+        str(redteam_config_path),
+        "-o",
+        str(output_path),
+        "-o",
+        str(html_report_path),
+        "--no-cache",
+    ]
+
+    eval_result = _run_stage(
+        cmd=eval_cmd,
+        timeout_sec=timeout_sec,
+        log_path=eval_log_path,
+        stage_name="eval",
+        allowed_exit_codes=(0, 100),
+    )
+
+
+    # ---------------------------------------------------------
+    # 7. ตรวจสอบ output ก่อนเรียก parser
+    # ---------------------------------------------------------
+    if not output_path.is_file():
+        raise FileNotFoundError(
+            "Promptfoo eval จบโดยไม่มี JSON output\n"
+            f"Expected JSON: {output_path}\n"
+            f"--- STDOUT (tail) ---\n"
+            f"{_tail(eval_result.stdout)}\n"
+            f"--- STDERR (tail) ---\n"
+            f"{_tail(eval_result.stderr)}"
+        )
+
+    try:
+        with output_path.open("r", encoding="utf-8") as f:
+            json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError(
+            f"Promptfoo สร้าง JSON ที่อ่านไม่ได้: {output_path}\n"
+            f"รายละเอียด: {exc}\n"
+            f"ตรวจสอบ log: {eval_log_path}"
+        ) from exc
+
+    if not html_report_path.is_file():
+        print(
+            "[promptfoo_runner] คำเตือน: ไม่พบ HTML report\n"
+            f"Expected: {html_report_path}"
+        )
+    else:
+        print(f"[promptfoo_runner] HTML report: {html_report_path}")
+
+    print(f"[promptfoo_runner] JSON result: {output_path}")
 
     return parse_promptfoo_report(output_path)
