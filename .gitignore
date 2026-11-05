@@ -33,7 +33,6 @@ garak_tags.csv
 
 # --- Secrets / env ---
 .env
-.env.*
 *.key
 
 # --- Docker ---
