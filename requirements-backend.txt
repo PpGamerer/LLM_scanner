@@ -2,14 +2,10 @@ fastapi==0.115.*
 uvicorn[standard]==0.32.*
 pydantic==2.*
 requests==2.*
-garak
+# garak 0.17.0 = เวอร์ชันที่ verify แล้ว (ชื่อ field ใน report, รายการ probe, tag) — อย่าปล่อยลอย
+garak==0.17.0
+# core/runners/promptfoo_runner.py generate config YAML ก่อนเรียก promptfoo CLI
 pyyaml==6.*
-# ต้องเพิ่มเข้ามาเพราะ core/runners/promptfoo_runner.py generate promptfooconfig.yaml
-# ก่อนเรียก promptfoo CLI (config-driven ต่างจาก garak ที่ส่ง flag ตรงๆ)
 
-# ⚠️ Promptfoo เอง (ตัว CLI) "ไม่ได้อยู่ในไฟล์นี้" เพราะเป็น Node.js package ไม่ใช่
-# pip package — ติดตั้งแยกต่างหากด้วย:
-#     npm install -g promptfoo
-# (หรือรันผ่าน npx โดย set env var PROMPTFOO_USE_NPX=1 แทนการติดตั้ง global — ดู
-# core/runners/promptfoo_runner.py) ถ้ารันผ่าน Docker ต้องเพิ่ม Node.js + คำสั่งติดตั้ง
-# ข้างต้นเข้า Dockerfile.backend เอง (ไฟล์นั้นไม่ได้ถูกแก้ในรอบนี้ เพราะไม่ได้ถูกอัปโหลดมา)
+# ⚠️ Promptfoo เองเป็น Node.js package ไม่ใช่ pip — ถ้ารันผ่าน Docker, Dockerfile.backend
+# ติดตั้งให้แล้ว (ปักเวอร์ชัน 0.123.1) ถ้ารันแบบไม่ใช้ Docker ให้ npm install -g promptfoo เอง

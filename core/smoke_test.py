@@ -9,7 +9,11 @@ from .runners.promptmap2_runner import run_promptmap2_scan
 from .runners.promptfoo_runner import run_promptfoo_scan
 
 
-def smoke_test_garak(model_name: str, timeout_sec: int | None = None) -> dict:
+def smoke_test_garak(
+    model_name: str,
+    timeout_sec: int | None = None,
+    ollama_url: str | None = None,
+) -> dict:
     """ยิง garak จริง แต่เลือก probe 'test' เพื่อเช็ค pipeline ให้เร็วที่สุด"""
     start = time.monotonic()
     try:
@@ -18,6 +22,7 @@ def smoke_test_garak(model_name: str, timeout_sec: int | None = None) -> dict:
             probes=["test.Blank"],  # แก้ตรงนี้: ใช้ probe สำหรับ test ระบบโดยเฉพาะ
             generations=1,
             timeout_sec=timeout_sec,
+            ollama_url=ollama_url,
         )
     except Exception as exc:
         return {
@@ -43,7 +48,7 @@ def smoke_test_garak(model_name: str, timeout_sec: int | None = None) -> dict:
     return {
         "check": "garak_smoke_scan",
         "ok": True,
-        "detail": f"garak รันจริงสำเร็จใน {elapsed:.0f}s ได้ {len(rows)} แถวผลลัพธ์ (probe: dan)",
+        "detail": f"garak รันจริงสำเร็จใน {elapsed:.0f}s ได้ {len(rows)} แถวผลลัพธ์ (probe: test.Blank)",
         "rows": rows,
     }
 
@@ -177,7 +182,10 @@ def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[
 
     if "garak" in tools:
         print(">>> เริ่ม garak smoke test", flush=True)
-        results.append(smoke_test_garak(model_name))
+        results.append(smoke_test_garak(
+            model_name,
+            ollama_url=target_config.get("base_url") or "http://localhost:11434",
+        ))
         print(">>> garak เสร็จแล้ว", flush=True)
 
     if "promptmap2" in tools:

@@ -218,6 +218,17 @@ def get_report_html_file(job_id: str):
         raise HTTPException(status_code=404, detail="ไม่พบไฟล์ report.html บน backend")
     return FileResponse(html_path, media_type="text/html")
 
+@app.get("/scan/{job_id}/files/{filename}")
+def get_scan_file(job_id: str, filename: str):
+    job = JOBS.get(job_id)
+    if not job or not job.get("result"):
+        raise HTTPException(status_code=404, detail="ไม่พบ job นี้")
+    scan_dir = (RESULTS_DIR / job["result"]["scan_id"]).resolve()
+    path = (scan_dir / filename).resolve()
+    if path.parent != scan_dir or not path.is_file():  # กัน ../
+        raise HTTPException(status_code=404, detail="ไม่พบไฟล์")
+    return FileResponse(path)
+
 @app.get("/health")
 def health():
     return {"status": "ok"}

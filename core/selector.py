@@ -46,6 +46,11 @@ from .owasp_mapping import (
 )
 from .report import save_reports
 
+DEFAULT_OLLAMA_URL = (
+    os.environ.get("OLLAMA_URL")
+    or os.environ.get("OLLAMA_BASE_URL")
+    or "http://localhost:11434"
+)
 # tool ไหน "ทำได้" บ้างในแต่ละหมวด — verify แล้วว่ามี probe/plugin/rule ที่ active
 # จริงรองรับ concept ของหมวดนั้น (ไม่ใช่แค่มี tag ลอยๆ) ลำดับใน list ไม่มีความหมาย
 # พิเศษ (ไม่ใช่ลำดับความสำคัญ) — เอาไว้ให้ UI/API โชว์เป็นตัวเลือกเฉยๆ
@@ -191,6 +196,7 @@ def run_scan(
     results = []
 
     generations = 1
+    ollama_url = target_config.get("base_url") or DEFAULT_OLLAMA_URL
     promptmap2_iterations = 1 if depth == "quick" else 5
     promptfoo_num_tests = _env_int("PROMPTFOO_QUICK_TESTS", 10) if depth == "quick" \
         else _env_int("PROMPTFOO_DEEP_TESTS", 50)
@@ -205,6 +211,7 @@ def run_scan(
             generations=generations,
             timeout_sec=None,
             output_dir=scan_dir,
+            ollama_url=ollama_url
         ))
 
     # 3. promptmap2
@@ -212,7 +219,7 @@ def run_scan(
         rule_types = promptmap2_rule_types_for_owasp(tool_plan["promptmap2"])
         results.extend(run_promptmap2_scan(
             model_name=target_config["model"],
-            ollama_url=target_config.get("base_url") or "http://localhost:11434",
+            ollama_url=ollama_url,
             iterations=promptmap2_iterations,
             system_prompt_path=target_config.get("system_prompt_path") or "system-prompt.txt",
             controller_model=target_config.get("controller_model"),
@@ -228,7 +235,7 @@ def run_scan(
         results.extend(run_promptfoo_scan(
             model_name=target_config["model"],
             plugins=plugins,
-            ollama_url=target_config.get("base_url") or "http://localhost:11434",
+            ollama_url=ollama_url,
             system_prompt_path=target_config.get("system_prompt_path") or "system-prompt.txt",
             num_tests=promptfoo_num_tests,
             grader_model=_PROMPTFOO_GRADER_MODEL,

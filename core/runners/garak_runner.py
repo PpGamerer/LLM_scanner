@@ -2,6 +2,7 @@
 runners/garak_runner.py — เรียก Garak ผ่าน subprocess
 """
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -14,14 +15,13 @@ _VENV_PYTHON = _PROJECT_ROOT / "venv" / "Scripts" / "python.exe"
 PYTHON_BIN = str(_VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
 
 # ไฟล์ผลสแกนทั้งหมดเก็บรวมไว้ที่ results/ แทนที่จะกองอยู่ที่ project root
-RESULTS_DIR = _PROJECT_ROOT / "results"
+RESULTS_DIR = _PROJECT_ROOT.parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 PRESET_PROBES = {
     "quick": ["dan"],
     "deep": ["promptinject", "dan", "latentinjection", "leakreplay", "misleading"],
 }
-
 
 def run_garak_scan(
     model_name: str,
@@ -30,6 +30,7 @@ def run_garak_scan(
     timeout_sec: int = 7200,
     generations: int | None = None,
     output_dir: Path | None = None,
+    ollama_url: str | None = None,
 ) -> list[dict]:
     """
     output_dir: โฟลเดอร์ที่จะเซฟ report ลง — ถ้าไม่ระบุ ใช้ RESULTS_DIR (core/results/) ตรงๆ
@@ -62,6 +63,19 @@ def run_garak_scan(
     
     if generations:
         cmd += ["--generations", str(generations)]
+
+    # garak's OllamaGenerator ตั้ง host เริ่มต้นเป็น "127.0.0.1:11434" ใน DEFAULT_PARAMS
+    # (ตรวจจากซอร์ส v0.17.0) จึงไม่อ่าน env OLLAMA_HOST — ถ้าไม่ส่งมาเอง ตอนรันใน Docker
+    # garak จะไปหา Ollama ใน container ตัวเองแล้วต่อไม่ได้ (promptfoo/promptmap2 รับ URL
+    # อยู่แล้ว มีแต่ garak ที่ไม่เคยได้) รูปแบบ JSON ตามตัวอย่างใน docstring ของ OllamaGenerator
+    if ollama_url:
+        cmd += [
+            "--generator_options",
+            json.dumps({"ollama": {
+                "OllamaGenerator": {"host": ollama_url},
+                "OllamaGeneratorChat": {"host": ollama_url},
+            }}),
+        ]
 
     try:
         result = subprocess.run(

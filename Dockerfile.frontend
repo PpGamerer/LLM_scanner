@@ -1,11 +1,19 @@
+# Frontend (Streamlit)
 FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 
 COPY requirements-frontend.txt .
-RUN pip install --no-cache-dir -r requirements-frontend.txt
+RUN pip install -r requirements-frontend.txt
 
+# ui/app.py import core.report (build_report_csv) — ถ้าไม่ copy core/ เข้ามา import จะพัง
+# แล้วปุ่ม "CSV ทุกแถว" หายไปเงียบๆ (REPORT_AVAILABLE=False) report.py ใช้แค่ stdlib
+# + owasp_mapping จึงไม่ต้องลง dependency ของ backend เพิ่ม
+COPY core/ ./core/
 COPY ui/ ./ui/
 
 EXPOSE 8501
-CMD ["streamlit", "run", "ui/app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["streamlit", "run", "ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]

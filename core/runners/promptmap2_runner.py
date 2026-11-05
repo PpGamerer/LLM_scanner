@@ -25,7 +25,7 @@ PYTHON_BIN = str(_VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
 
 # ไฟล์ผลสแกนทั้งหมดเก็บรวมไว้ที่ results/ แทนที่จะกองอยู่ที่ project root
 # (ตัวเดียวกับที่ garak_runner.py ใช้ — ถ้าจะย้ายทีหลัง แก้ที่นี่กับ garak_runner.py คู่กัน)
-RESULTS_DIR = _PROJECT_ROOT / "results"
+RESULTS_DIR = _PROJECT_ROOT.parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 _DEFAULT_SCRIPT_CANDIDATES = [

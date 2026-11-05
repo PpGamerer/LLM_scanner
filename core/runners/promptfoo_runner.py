@@ -62,11 +62,10 @@ _CURRENT_FILE = Path(__file__).resolve()
 _PROJECT_ROOT = _CURRENT_FILE.parents[1]
 
 # เก็บผลไว้ใน results/ เช่นเดียวกับ runner ตัวอื่น
-RESULTS_DIR = _PROJECT_ROOT / "results"
+RESULTS_DIR = _PROJECT_ROOT.parent / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 USE_NPX = os.environ.get("PROMPTFOO_USE_NPX", "0") == "1"
-
 
 def _resolve_promptfoo_bin() -> list[str]:
     """
@@ -141,7 +140,11 @@ def _build_config(
             ),
             "plugins": list(plugins),
             "numTests": num_tests,
-            "strategies": ["jailbreak"],
+            "strategies": [
+                s.strip()
+                for s in os.environ.get("PROMPTFOO_STRATEGIES", "").split(",")
+                if s.strip()
+            ],
         },
     }
 
@@ -189,6 +192,9 @@ def _run_command(
         **os.environ,
         "PROMPTFOO_DISABLE_TELEMETRY": "true",
     }
+    email = os.environ.get("PROMPTFOO_EMAIL")
+    # input= ใช้คู่กับ stdin= ไม่ได้ (subprocess จะ raise ValueError)
+    stdin_kwargs = {"input": email + "\n"} if email else {"stdin": subprocess.DEVNULL}
 
     try:
         return subprocess.run(
@@ -200,8 +206,8 @@ def _run_command(
             encoding="utf-8",
             errors="replace",
             env=env,
-            stdin=subprocess.DEVNULL,
             check=False,
+            **stdin_kwargs,
         )
 
     except subprocess.TimeoutExpired as exc:

@@ -29,6 +29,7 @@ system-prompt.txt
 # --- garak's own cache/run dir (ถ้าถูกสร้างในเครื่อง ไม่ใช่ report_prefix ที่เรากำหนดเอง) ---
 .local/share/garak/
 garak_runs/
+garak_tags.csv
 
 # --- Secrets / env ---
 .env

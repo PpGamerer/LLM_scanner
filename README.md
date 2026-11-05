@@ -146,8 +146,10 @@ npm install -g promptfoo
 ```
 
 Promptfoo เป็น **config-driven** (ไม่ใช่ CLI flag ล้วนแบบ garak) — `promptfoo_runner.py`
-generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่ต้องการ แล้วเรียก
-`promptfoo redteam run -c <config>.yaml -o <output>.json --no-cache`
+generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่ต้องการ 
+แล้วเรียกสองขั้น: `promptfoo redteam generate -c <config>.yaml -o <redteam>.yaml --no-cache`
+ตามด้วย `promptfoo redteam eval -c <redteam>.yaml -o <output>.json -o <output>.html --no-cache`
+(แยกสองขั้นเพื่อไม่ให้ path ของ HTML report ถูกส่งไปเป็น config)
 
 **สถานะ ณ ตอนนี้ — ✅ verify ผ่านจริงแล้ว หลายรอบ:**
 - รันจริงสำเร็จจนจบหลายรอบ (ไม่ใช่แค่ครั้งเดียว) — ปัญหา `ENOENT` ที่เคยเจอตอนแรก
@@ -166,17 +168,13 @@ generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่
 - แก้ bug ที่ `owasp:llm:01` เคยขยายเป็น 28 sub-plugin ไม่ใช่ 1 test อย่างที่ตั้งใจ
   (default strategies ของ promptfoo คูณเข้าไปเองด้วย) — เติม `"strategies": []` ใน
   `_build_config()` แล้ว + smoke test เปลี่ยนเป็น plugin เดี่ยวแทน preset
-- **เซฟ HTML report คู่กับ JSON แล้ว** (`promptfoo_runner.py` ส่ง `-o` 2 ตัวในคำสั่งเดียว):
-  ได้ `results/<scan_id>/promptfoo_scan_<model>.html` ไว้เปิดดูใน browser (pass/fail ต่อ
-  plugin, prompt/response เทียบกัน) เหมือน `*.report.html` ของ garak — เป็นไฟล์เสริม
-  `promptfoo_parser.py` ยัง parse จาก `.json` เท่านั้น ไม่แตะ `.html` ⚠️ ยังไม่ verify กับ
-  การรันจริงว่า promptfoo เวอร์ชันที่ลงรับ `-o` ซ้ำ 2 ตัวและเขียนทั้งสองไฟล์ครบ
 - `system_prompt_path` เดียวกับที่ promptmap2 ใช้ ถูก reuse ให้ promptfoo's
   `prompt-extraction` plugin ด้วย (ผ่าน `_resolve_system_prompt_file` ที่ import มาจาก
   `promptmap2_runner.py` ตรงๆ ไม่เขียนซ้ำ) — ไม่ต้องเพิ่ม field ใหม่ใน UI
 
-**ยังไม่ได้แก้**: `Dockerfile.backend` ยังไม่ได้เพิ่ม Node.js + `npm install -g promptfoo`
-เข้าไป — ต้องแก้ก่อน build ใหม่ ไม่งั้น container ของ backend จะหา `promptfoo` ไม่เจอ
+ใน Docker: `Dockerfile.backend` ติดตั้ง Node.js 20 + `promptfoo` ให้แล้ว (pin เวอร์ชันได้ด้วย
+`--build-arg PROMPTFOO_VERSION=x.y.z` หรือ `build.args` ใน compose — ควร pin เป็นเวอร์ชันที่ทดสอบแล้ว
+เพราะ `latest` ทำให้ build คนละวันได้ plugin id/output schema คนละแบบ)
 
 ## promptmap2 — ⚠️ opt-in เท่านั้น ไม่ใช่ default อีกต่อไป
 
@@ -225,15 +223,8 @@ Ollama ไม่ตอบ) job จะแขวนไม่มีวันจบ�
 ต่างจาก family เปล่าๆ จริงหรือเปล่า** ควรรัน smoke test จริงสักรอบแล้วเช็ค error log
 ก่อนเชื่อ 100%
 
-**บั๊กเล็กใน `smoke_test.py` ที่ยังไม่แก้** (อ่านจากโค้ด ไม่กระทบการรัน แต่ทำให้ข้อความ
-สับสน): (1) `smoke_test_garak()` รายงานว่า "(probe: dan)" ทั้งที่ probe จริงคือ `test.Blank`
-(2) `__main__` มี mock `tool_plan` hardcode (promptfoo ใต้ LLM01/02/09 ฯลฯ) ที่ไม่ตรงกับ
-`CATEGORY_DEFAULT_TOOL` ปัจจุบัน และไม่มี LLM05/LLM10 — แค่ตัวอย่างโชว์โครงสร้าง ไม่ได้ถูก
-ใช้ตัดสินอะไร
-
 **บั๊กที่รู้แล้วแต่ยังไม่แก้**: `smoke_test_promptmap2()` ไม่ได้ส่ง `rule_types` เลย ทำให้
-promptmap2 รันทุก rule ทุก type (ยืนยันจากผลจริงแล้ว: smoke test รอบล่าสุดได้ 37 rule ใน
-output json ไม่ใช่ rule เดียว) แทนที่จะเบาจริงๆ อย่างที่ตั้งใจ — นี่คือสาเหตุที่เคยชน
+promptmap2 รันทุก rule ทุก type แทนที่จะเบาจริงๆ อย่างที่ตั้งใจ — นี่คือสาเหตุที่เคยชน
 timeout 600s มาก่อน (ตอนนี้ปิด timeout ไปแล้วเลยไม่ error แต่ก็ยังช้ากว่าที่ควรอยู่ดี)
 
 ## โครงสร้างไฟล์
@@ -242,11 +233,6 @@ timeout 600s มาก่อน (ตอนนี้ปิด timeout ไปแ�
 llm_scanner/
 ├── core/
 │   ├── generators/base.py       # target adapter (Ollama, OpenAI-compatible, Matthew)
-│   │                             # ⚠️ ยังไม่ถูกใช้งานจริง: ไม่มีไฟล์ไหนที่อัปโหลดมา (selector/
-│   │                             #   runners/smoke_test/app) import `build_generator` เลย — ทั้ง 3
-│   │                             #   tool รับแค่ชื่อโมเดล Ollama แล้วเรียกเองผ่าน CLI ของตัวเอง
-│   │                             #   (เหลือ api/main.py ที่ยังไม่ได้เช็ค) เก็บไว้เป็นโครงสำหรับ
-│   │                             #   target type อื่นในอนาคต
 │   ├── runners/
 │   │   ├── garak_runner.py      # เรียก Garak (external tool)
 │   │   ├── promptmap2_runner.py # เรียก promptmap2 (external tool) — opt-in เท่านั้น
@@ -272,20 +258,23 @@ llm_scanner/
 │                                  #   GET /scan/{id}/report/html (ไฟล์จริงจากดิสก์)
 ├── ui/app.py                     # Streamlit form + dropdown เลือก tool ต่อหมวด + unified report
 ├── docker-compose.yml
-├── Dockerfile.backend             # ⚠️ ยังไม่ได้เพิ่ม Node.js/npm สำหรับ promptfoo
-├── Dockerfile.frontend
+├── Dockerfile.backend             # Python 3.11 + Node.js 20 + promptfoo + garak + promptmap2
+├── Dockerfile.frontend            # streamlit อย่างเดียว ไม่ import core/
+├── .env.example                   # copy เป็น .env (grader model, จำนวน test ฯลฯ)
+├── .dockerignore
 ├── requirements-backend.txt
 └── requirements-frontend.txt
 ```
 
 ## สถานะตอนนี้ (สำคัญ — อ่านก่อนใช้)
 
-- ✅ **Garak + target type "ollama"** — implement ครบ ใช้งานได้จริง
+- ✅ **Garak + target type "ollama"** — implement ครบ ใช้งานได้จริงทั้งบนเครื่องและใน Docker
+  (ต้องส่ง `--generator_options` ให้ทั้ง `OllamaGenerator` และ `OllamaGeneratorChat` — ดูหัวข้อ "วิธีรัน")
 - ⚠️ **promptmap2 + target type "ollama"** — implement ครบ แต่เป็น **opt-in เท่านั้น
   ไม่ใช่ default** (ดูหัวข้อ "promptmap2" ด้านบน) ต้อง
   `git clone github.com/utkusen/promptmap` มาวางที่ `./promptmap/` (ไม่ได้อยู่บน PyPI)
 - ✅ **Promptfoo + target type "ollama"** — verify กับการรันจริงแล้วหลายรอบ (ดูหัวข้อ
-  "Promptfoo" ด้านบน) `Dockerfile.backend` ยังไม่ได้แก้เป็นจุดเดียวที่ค้าง
+  "Promptfoo" ด้านบน) ส่วนรันใน Docker เขียน Dockerfile ให้แล้วแต่ยังไม่เคย build จริง
 - ✅ **Field name ใน `garak_parser.py` — verify กับ report จริงแล้ว**: eval entry ของ garak
   ใช้ `total_evaluated` (ไม่ใช่ `total` อย่างที่เดาไว้ตอนแรก) มี fallback ไป `total_processed` ด้วย
   1 probe อาจมีหลาย eval entry ถ้าโดนเช็คด้วยหลาย detector (เก็บ field `detector` แยกไว้แล้ว)
@@ -338,10 +327,8 @@ llm_scanner/
 - ✅ **Unified HTML report ดึงจากไฟล์จริงแล้ว** — เพิ่ม `GET /scan/{job_id}/report/html`
   ให้ UI ดึงไฟล์ที่เซฟไว้จริงบน `results/<scan_id>/report.html` ตรงๆ แทนการ
   `build_report_html()` ใหม่ใน memory ทุกครั้ง (กันปัญหา stale-import/backend restart
-  แล้วหา report เก่าไม่เจอ) — `ui/app.py` ตอนนี้ดึง HTML จาก endpoint นี้อย่างเดียว
-  (โชว์ inline + ปุ่มดาวน์โหลด) **ไม่ได้ build HTML ใน memory อีกแล้ว** เหลือที่ build ฝั่ง
-  UI แค่ CSV ผ่าน `build_report_csv()` (ปุ่ม "CSV ทุกแถว") ซึ่งยัง import `core.report` ตรงๆ
-  — ถ้า import ไม่ได้ ปุ่มนี้จะหายไปเงียบๆ (`REPORT_AVAILABLE=False`)
+  แล้วหา report เก่าไม่เจอ) — `ui/app.py` ยังมีปุ่มแบบเดิม (build ใน memory + download
+  button) คู่กันไว้ด้วยเผื่ออยากดูแบบ inline เร็วๆ โดยไม่โหลดไฟล์
 - ✅ **`report.py`/`ui/app.py` วน loop ผ่าน `tool_plan`/`results` แบบ generic** —
   ไม่ hardcode ชื่อ tool เลย เพิ่ม tool ใหม่ (promptfoo) โดยไม่ต้องแตะโค้ดส่วนแสดงผลเลย
 - ✅ **Smoke test** — ยิงสแกนจริงขนาดจิ๋ว (garak, promptmap2, promptfoo) ก่อนสแกนเต็ม
@@ -364,32 +351,36 @@ llm_scanner/
 - ⚠️ **Job storage เป็น in-memory dict** ใน `api/main.py` — ถ้า restart backend
   ประวัติ job หาย พอสำหรับเดโม ถ้าต้องการ persist จริงจังค่อยเปลี่ยนเป็น SQLite
 
-## วิธีรัน (ต้องมี Ollama รันอยู่ก่อนบนเครื่อง host)
+## วิธีรัน (Ollama รันเป็น service ใน compose)
 
 ```bash
-git clone https://github.com/utkusen/promptmap
-# ให้ได้โฟลเดอร์ ./promptmap/ อยู่ที่ project root เดียวกับ docker-compose.yml
-# (ต้องมีแม้ promptmap2 จะเป็นแค่ opt-in แล้ว เพราะ Dockerfile.backend ยัง COPY
-# โฟลเดอร์นี้เข้า image เสมอ ไม่มีก็ build ไม่ผ่าน)
-
-npm install -g promptfoo
-# ⚠️ Dockerfile.backend ยังไม่ได้แก้ให้ติดตั้งอัตโนมัติ — ถ้ารันแบบไม่ใช้ Docker
-# ต้องติดตั้งเองก่อนด้วยคำสั่งนี้
-
-ollama serve
-ollama pull dolphin3
-
-docker compose up --build
+  git clone https://github.com/utkusen/promptmap
+  cp .env.example .env          # ใส่ PROMPTFOO_EMAIL ด้วย (promptfoo redteam ถามอีเมลครั้งแรก)
+  docker compose up --build
+  docker compose exec ollama ollama pull llama-guard3:1b   # grader(แนะนำllama-guard3:1b) และเพิ่มโมเดลที่จะสแกน
 ```
+port 8000 (backend) และ 8501 (frontend) ถูก publish ที่ทุก interface (`"8000:8000"`, `"8501:8501"`)
+API ไม่มี auth และสั่งรันสแกนได้ ถ้าอยู่บนเครือข่ายที่ไม่ไว้ใจ ให้แก้ `ports` ใน `docker-compose.yml`
+เป็น `"127.0.0.1:8000:8000"` / `"127.0.0.1:8501:8501"`
+
+Node.js กับ promptfoo ติดตั้งใน image ให้แล้ว ไม่ต้องลงบนเครื่อง host
 
 เปิดเบราว์เซอร์ไปที่ `http://localhost:8501`
 
-**ถ้า backend/frontend หา Ollama ไม่เจอ**: ใน `ui/app.py` ให้เปลี่ยน Ollama Base URL จาก
-`http://localhost:11434` เป็น `http://host.docker.internal:11434` (ตั้งค่า
-`extra_hosts` ไว้ให้ทั้ง backend และ frontend ใน `docker-compose.yml` แล้ว)
+**Ollama**: compose รัน Ollama เป็น service `ollama` เอง (volume `ollama-data`) ทั้ง backend และ frontend
+ใช้ `OLLAMA_URL=http://ollama:11434` (ตั้งใน `.env`) เป็นค่าเริ่มต้นของช่อง "Ollama Base URL" —
+ต้อง `ollama pull` โมเดลที่จะสแกนและ grader เข้า container นี้ก่อน
 
-ผลสแกนที่เซฟไว้ระหว่างรัน (`report.html`/`.json`/`.csv` + ไฟล์ดิบของแต่ละ tool) จะออกมา
-อยู่ที่ `./results/<scan_id>/` บนเครื่อง host ด้วย (ผ่าน volume mount)
+ถ้าอยากใช้ Ollama บนเครื่อง host แทน ให้ตั้ง `OLLAMA_URL=http://host.docker.internal:11434`,
+เพิ่ม `extra_hosts: ["host.docker.internal:host-gateway"]` ให้ backend/frontend ใน compose
+และให้ Ollama บน host listen ที่ `0.0.0.0` (`OLLAMA_HOST=0.0.0.0 ollama serve`)
+
+**garak ไม่อ่าน env และต้องส่ง host เอง**: `OllamaGenerator` มี default `127.0.0.1:11434`
+และ garak v0.17.0 สร้าง `OllamaGeneratorChat` (subclass) จริงตอนใช้ `--model_type ollama`
+จึงต้องส่ง `--generator_options` ที่ตั้ง `host` ให้ **ทั้งสองคลาส** (`OllamaGenerator` และ
+`OllamaGeneratorChat`) ถ้าตั้งแค่คลาสแรก garak จะต่อ `127.0.0.1` ใน container ตัวเองแล้ว
+ขึ้น `ConnectionError: Failed to connect to Ollama` (ดูได้จาก `connect_tcp.started host='127.0.0.1'`
+ใน `/root/.local/share/garak/garak.log`)
 
 ## รันแบบไม่ใช้ Docker (debug ง่ายกว่าตอนพัฒนา)
 
@@ -416,9 +407,9 @@ python -m core.smoke_test
 ## Next steps
 
 1. **ยืนยัน `test.Blank` (garak smoke test) ว่าจริงๆ รันได้แม้เป็น 💤**
-2. แก้ `Dockerfile.backend` เพิ่ม Node.js + `npm install -g promptfoo`
-3. จำกัด `rule_types` ให้ `smoke_test_promptmap2()` (+ แก้ข้อความ "probe: dan" และ mock
-   `tool_plan` ใน `smoke_test.py`)
+2. **ลอง `docker compose up --build` จริงสักรอบ** แล้วเช็คว่า (ก) pip resolve garak กับ promptmap2 ผ่าน
+   (ข) `promptfoo` รันใน container ได้ (ค) garak ต่อ Ollama ใน container ติด — แก้ `--generator_options` ให้ครอบ `OllamaGeneratorChat` แล้ว แต่ยังต้องรัน smoke test ยืนยันอีกรอบ
+3. จำกัด `rule_types` ให้ `smoke_test_promptmap2()`
 4. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
 5. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
 6. เติม target type `openai_compatible`/`matthew`

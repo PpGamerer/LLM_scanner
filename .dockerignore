@@ -1,0 +1,17 @@
+# ไม่ให้ส่งของหนักเข้า build context (ผลสแกน garak ไฟล์เดียวหลายสิบ MB)
+.git
+.git/
+.gitignore
+venv/
+.venv/
+**/__pycache__/
+*.pyc
+results/
+core/results/
+node_modules/
+.env
+*.log
+*.jsonl
+# promptmap2 clone ตอน build เอง ไม่เอาของในเครื่องเข้าไป
+promptmap/
+system-prompt.txt
