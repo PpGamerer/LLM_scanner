@@ -256,6 +256,12 @@ def watch_job(job_id):
         return
     if code != 200 or info.get("status") in ("done", "failed"):
         st.rerun()
+    p = info.get("progress")
+    if p and p.get("total"):
+        st.progress(
+            min(p["done"] / p["total"], 1.0),
+            text=f"{p['label']} ({p['done']}/{p['total']} ขั้น)",
+        )
     st.info(
         f"สถานะ: {info.get('status')} — เก็บลิงก์หน้านี้ไว้ได้ "
         "ปิดแล้วเปิดใหม่ก็กลับมาดูต่อได้"

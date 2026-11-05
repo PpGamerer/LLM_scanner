@@ -62,7 +62,7 @@ CATEGORY_CAPABLE_TOOLS = {
     # plugin สำเร็จรูปเหมือนหมวดอื่น เลยยังไม่มี runner รองรับใน codebase นี้
     "LLM05": ["garak"],
     "LLM06": ["promptfoo"],              # garak ยังไม่มี probe active ตรง concept นี้
-    "LLM07": ["promptmap2", "garak", "promptfoo"],
+    "LLM07": ["garak", "promptfoo"],
     "LLM09": ["garak", "promptfoo"],
     "LLM10": ["garak", "promptfoo"],
 }
@@ -162,6 +162,7 @@ def run_scan(
     owasp_categories: list[str] | None = None,
     depth: str = "deep",
     tool_overrides: dict[str, str] | None = None,
+    on_progress=None,
 ) -> tuple[list[dict], dict, str]:
     """
     Entry point หลักของ engine
@@ -193,6 +194,14 @@ def run_scan(
     # 1. ตัดสินว่าแต่ละ category ใช้ tool ไหน (default หรือ override) — 1 tool/category
     tool_plan = resolve_tool_plan(categories, tool_overrides)
 
+    steps = [t for t in ("garak", "promptmap2", "promptfoo") if t in tool_plan]
+
+    def _progress(done: int, label: str):
+        if on_progress:
+            on_progress(done, len(steps) + 1, label)  # +1 = ขั้นสรุปผล/เซฟ report
+
+    _progress(0, "เริ่มสแกน")
+    
     results = []
 
     generations = 1
@@ -204,6 +213,7 @@ def run_scan(
 
     # 2. Garak
     if "garak" in tool_plan:
+        _progress(steps.index("garak"), "กำลังรัน garak")
         probes = garak_probes_for_owasp(tool_plan["garak"], depth=depth)
         results.extend(run_garak_scan(
             model_name=target_config["model"],
@@ -216,6 +226,7 @@ def run_scan(
 
     # 3. promptmap2
     if "promptmap2" in tool_plan:
+        _progress(steps.index("promptmap2"), "กำลังรัน promptmap2")
         rule_types = promptmap2_rule_types_for_owasp(tool_plan["promptmap2"])
         results.extend(run_promptmap2_scan(
             model_name=target_config["model"],
@@ -231,6 +242,7 @@ def run_scan(
 
     # 4. Promptfoo
     if "promptfoo" in tool_plan:
+        _progress(steps.index("promptfoo"), "กำลังรัน promptfoo")
         plugins = promptfoo_plugins_for_owasp(tool_plan["promptfoo"], depth=depth)
         results.extend(run_promptfoo_scan(
             model_name=target_config["model"],
@@ -247,8 +259,9 @@ def run_scan(
     # _expand_dual_category_garak_rows() แทนการเทียบ owasp_category ตรงๆ เพราะผล
     # จาก garak บาง probe (web_injection, exploitation, divergence.Repeat) ตรง
     # concept มากกว่า 1 category พร้อมกัน (ดู docstring หัวไฟล์ 2026-10 รอบสิบเอ็ด)
+    _progress(len(steps), "สรุปผลและเซฟรายงาน")
     results = _expand_dual_category_garak_rows(results, categories)
-
+    
     # 6. เซฟ report รวม
     try:
         save_reports(results, dict(tool_plan), scan_dir, target_config)

@@ -176,7 +176,7 @@ def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[
             "rows": [],
         }]
 
-    tools = tools or ["garak", "promptmap2", "promptfoo"]
+    tools = tools or ["garak", "promptfoo"]
     model_name = target_config["model"]
     results = []
 

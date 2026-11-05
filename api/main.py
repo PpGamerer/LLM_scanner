@@ -85,12 +85,17 @@ def _execute_scan(
     tool_overrides: dict[str, str] | None,
 ):
     JOBS[job_id]["status"] = "running"
+
+    def on_progress(done, total, label):
+        JOBS[job_id]["progress"] = {"done": done, "total": total, "label": label}
+
     try:
         rows, tool_plan, scan_id = run_scan(
             target_config,
             owasp_categories=owasp_categories,
             depth=depth,
             tool_overrides=tool_overrides,
+            on_progress=on_progress,
         )
         summary = summarize_by_owasp(rows)
         JOBS[job_id]["status"] = "done"

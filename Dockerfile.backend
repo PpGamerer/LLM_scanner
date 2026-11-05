@@ -1,12 +1,12 @@
-# Backend (FastAPI + garak + promptfoo + promptmap2)
+# Python 3.11 + Node.js 22 + promptfoo + garak
 FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# Node.js (promptfoo เป็น Node CLI) + git (clone promptmap2) + curl (healthcheck)
+# Node.js (promptfoo เป็น Node CLI) + curl (healthcheck)
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl gnupg git \
+ && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
  && apt-get install -y --no-install-recommends nodejs \
  && rm -rf /var/lib/apt/lists/*
@@ -24,13 +24,13 @@ RUN pip install torch --index-url https://download.pytorch.org/whl/cpu \
 
 # promptmap2 (opt-in tool ของ LLM07) — clone ตอน build แทนการต้อง git clone เองก่อนทุกครั้ง
 # ปักเวอร์ชันได้ด้วย: docker compose build --build-arg PROMPTMAP_REF=<commit/tag>
-ARG PROMPTMAP_REF=""
-RUN git clone --depth 1 https://github.com/utkusen/promptmap promptmap \
- && if [ -n "$PROMPTMAP_REF" ]; then \
-      git -C promptmap fetch --depth 1 origin "$PROMPTMAP_REF" \
-      && git -C promptmap checkout FETCH_HEAD; \
-    fi \
- && if [ -f promptmap/requirements.txt ]; then pip install -r promptmap/requirements.txt; fi
+# ARG PROMPTMAP_REF=""
+# RUN git clone --depth 1 https://github.com/utkusen/promptmap promptmap \
+#  && if [ -n "$PROMPTMAP_REF" ]; then \
+#       git -C promptmap fetch --depth 1 origin "$PROMPTMAP_REF" \
+#       && git -C promptmap checkout FETCH_HEAD; \
+#     fi \
+#  && if [ -f promptmap/requirements.txt ]; then pip install -r promptmap/requirements.txt; fi
 
 COPY core/ ./core/
 COPY api/ ./api/
