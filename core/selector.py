@@ -35,13 +35,11 @@ from datetime import datetime
 from pathlib import Path
 
 from .runners.garak_runner import run_garak_scan, RESULTS_DIR
-from .runners.promptmap2_runner import run_promptmap2_scan
 from .runners.promptfoo_runner import run_promptfoo_scan
 from .owasp_mapping import (
     garak_probes_for_owasp,
     garak_probe_categories,
-    promptmap2_rule_types_for_owasp,
-    promptfoo_plugins_for_owasp,
+    promptfoo_plugins_for_owasp,                          
     OWASP_CATEGORIES,
 )
 from .report import save_reports
@@ -194,26 +192,26 @@ def run_scan(
     # 1. ตัดสินว่าแต่ละ category ใช้ tool ไหน (default หรือ override) — 1 tool/category
     tool_plan = resolve_tool_plan(categories, tool_overrides)
 
-    steps = [t for t in ("garak", "promptmap2", "promptfoo") if t in tool_plan]
+    total_cats = sum(len(cats) for cats in tool_plan.values())
+    done_cats = 0
 
-    def _progress(done: int, label: str):
+    def _progress(label: str):
         if on_progress:
-            on_progress(done, len(steps) + 1, label)  # +1 = ขั้นสรุปผล/เซฟ report
+            on_progress(done_cats, total_cats, label)
 
-    _progress(0, "เริ่มสแกน")
-    
+    _progress("เริ่มสแกน")
+
     results = []
 
     generations = 1
     ollama_url = target_config.get("base_url") or DEFAULT_OLLAMA_URL
-    promptmap2_iterations = 1 if depth == "quick" else 5
     promptfoo_num_tests = _env_int("PROMPTFOO_QUICK_TESTS", 10) if depth == "quick" \
         else _env_int("PROMPTFOO_DEEP_TESTS", 50)
     _PROMPTFOO_GRADER_MODEL = os.environ.get("PROMPTFOO_GRADER_MODEL", "dolphin3") or None
 
     # 2. Garak
     if "garak" in tool_plan:
-        _progress(steps.index("garak"), "กำลังรัน garak")
+        _progress(f"กำลังรัน garak ({', '.join(tool_plan['garak'])})")
         probes = garak_probes_for_owasp(tool_plan["garak"], depth=depth)
         results.extend(run_garak_scan(
             model_name=target_config["model"],
@@ -221,28 +219,14 @@ def run_scan(
             generations=generations,
             timeout_sec=None,
             output_dir=scan_dir,
-            ollama_url=ollama_url
-        ))
-
-    # 3. promptmap2
-    if "promptmap2" in tool_plan:
-        _progress(steps.index("promptmap2"), "กำลังรัน promptmap2")
-        rule_types = promptmap2_rule_types_for_owasp(tool_plan["promptmap2"])
-        results.extend(run_promptmap2_scan(
-            model_name=target_config["model"],
             ollama_url=ollama_url,
-            iterations=promptmap2_iterations,
-            system_prompt_path=target_config.get("system_prompt_path") or "system-prompt.txt",
-            controller_model=target_config.get("controller_model"),
-            controller_model_type=target_config.get("controller_model_type"),
-            rule_types=rule_types,
-            timeout_sec=None,
-            output_dir=scan_dir,
         ))
+        done_cats += len(tool_plan["garak"])
+        _progress("garak เสร็จ")
 
-    # 4. Promptfoo
+    # 3. Promptfoo
     if "promptfoo" in tool_plan:
-        _progress(steps.index("promptfoo"), "กำลังรัน promptfoo")
+        _progress(f"กำลังรัน promptfoo ({', '.join(tool_plan['promptfoo'])})")
         plugins = promptfoo_plugins_for_owasp(tool_plan["promptfoo"], depth=depth)
         results.extend(run_promptfoo_scan(
             model_name=target_config["model"],
@@ -254,15 +238,14 @@ def run_scan(
             timeout_sec=None,
             output_dir=scan_dir,
         ))
+        done_cats += len(tool_plan["promptfoo"])
+        _progress("promptfoo เสร็จ")
 
-    # 5. filter ผลลัพธ์สุดท้ายให้เหลือแค่ category ที่ user เลือกจริง — ใช้
-    # _expand_dual_category_garak_rows() แทนการเทียบ owasp_category ตรงๆ เพราะผล
-    # จาก garak บาง probe (web_injection, exploitation, divergence.Repeat) ตรง
-    # concept มากกว่า 1 category พร้อมกัน (ดู docstring หัวไฟล์ 2026-10 รอบสิบเอ็ด)
-    _progress(len(steps), "สรุปผลและเซฟรายงาน")
+    # 4. filter ผลลัพธ์ตาม category ที่ user เลือก
+    _progress("สรุปผลและเซฟรายงาน")
     results = _expand_dual_category_garak_rows(results, categories)
-    
-    # 6. เซฟ report รวม
+
+    # 5. เซฟ report รวม
     try:
         save_reports(results, dict(tool_plan), scan_dir, target_config)
     except OSError as exc:

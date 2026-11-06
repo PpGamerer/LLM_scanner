@@ -2,12 +2,17 @@
 smoke_test.py — ทดสอบสแกนจริงขนาดจิ๋วเพื่อยืนยัน pipeline
 """
 
+import os
 import time
 
 from .runners.garak_runner import run_garak_scan
-from .runners.promptmap2_runner import run_promptmap2_scan
 from .runners.promptfoo_runner import run_promptfoo_scan
 
+DEFAULT_OLLAMA_URL = (
+    os.environ.get("OLLAMA_URL")
+    or os.environ.get("OLLAMA_BASE_URL")
+    or "http://localhost:11434"
+)
 
 def smoke_test_garak(
     model_name: str,
@@ -51,61 +56,6 @@ def smoke_test_garak(
         "detail": f"garak รันจริงสำเร็จใน {elapsed:.0f}s ได้ {len(rows)} แถวผลลัพธ์ (probe: test.Blank)",
         "rows": rows,
     }
-
-
-def smoke_test_promptmap2(
-    model_name: str,
-    ollama_url: str = "http://localhost:11434",
-    system_prompt_path: str = "system-prompt.txt",
-    controller_model: str | None = None,
-    controller_model_type: str | None = None,
-    timeout_sec: int | None = None,  # ปิด timeout ตามที่ตกลงกันไว้ (2026-09) — เจอเคส
-    # จริงว่า smoke test ไม่ได้ส่ง rule_types เลย ทำให้ promptmap2 รันทุก rule
-    # ทุก type (distraction/harmful/hate/jailbreak/prompt_stealing/social_bias)
-    # ไม่ใช่แค่ rule เดียวอย่างที่ comment เข้าใจผิดไว้ตอนแรก เกิน 600s ได้ง่ายมาก
-    # ถ้าโมเดล local รันช้า (เช่นบน CPU) — ปิด timeout ไปก่อนจนกว่าจะจำกัด
-    # rule_types ให้ smoke test เบาจริงๆ (ดู comment ใน run_smoke_test ด้านล่าง)
-) -> dict:
-    """ยิง promptmap2 จริง 1 iteration ต่อ rule"""
-    start = time.monotonic()
-    try:
-        rows = run_promptmap2_scan(
-            model_name=model_name,
-            ollama_url=ollama_url,
-            iterations=1,
-            system_prompt_path=system_prompt_path,
-            controller_model=controller_model,
-            controller_model_type=controller_model_type,
-            timeout_sec=timeout_sec,
-        )
-    except Exception as exc:
-        return {
-            "check": "promptmap2_smoke_scan",
-            "ok": False,
-            "detail": f"รัน promptmap2 จริงไม่สำเร็จ: {exc}",
-            "rows": [],
-        }
-
-    elapsed = time.monotonic() - start
-
-    if not rows:
-        return {
-            "check": "promptmap2_smoke_scan",
-            "ok": False,
-            "detail": (
-                f"promptmap2 subprocess รันจบใน {elapsed:.0f}s (ไม่ error) "
-                "แต่ parse ผลลัพธ์ออกมาไม่ได้เลยสักแถว"
-            ),
-            "rows": [],
-        }
-
-    return {
-        "check": "promptmap2_smoke_scan",
-        "ok": True,
-        "detail": f"promptmap2 รันจริงสำเร็จใน {elapsed:.0f}s ได้ {len(rows)} แถวผลลัพธ์ (iterations=1)",
-        "rows": rows,
-    }
-
 
 def smoke_test_promptfoo(
     model_name: str,
@@ -176,44 +126,32 @@ def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[
             "rows": [],
         }]
 
-    tools = tools or ["garak", "promptfoo"]
+    supported = ["garak", "promptfoo"]
+    tools = tools or supported
+    unknown = [t for t in tools if t not in supported]
+    if unknown:
+        return [{
+            "check": "tools",
+            "ok": False,
+            "detail": f"smoke test ไม่รองรับ tool: {unknown} (รองรับ: {supported})",
+            "rows": [],
+        }]
+
     model_name = target_config["model"]
+    ollama_url = target_config.get("base_url") or DEFAULT_OLLAMA_URL
     results = []
 
     if "garak" in tools:
         print(">>> เริ่ม garak smoke test", flush=True)
-        results.append(smoke_test_garak(
-            model_name,
-            ollama_url=target_config.get("base_url") or "http://localhost:11434",
-        ))
+        results.append(smoke_test_garak(model_name, ollama_url=ollama_url))
         print(">>> garak เสร็จแล้ว", flush=True)
 
-    if "promptmap2" in tools:
-        # ใช้ or เพื่อป้องกัน NoneType fallback fail
-        ollama_url = target_config.get("base_url") or "http://localhost:11434"
-        sys_path = target_config.get("system_prompt_path") or "system-prompt.txt"
-
-        print(">>> เริ่ม promptmap2 smoke test", flush=True)
-        results.append(smoke_test_promptmap2(
-            model_name=model_name,
-            ollama_url=ollama_url,
-            system_prompt_path=sys_path,
-            controller_model=target_config.get("controller_model"),
-            controller_model_type=target_config.get("controller_model_type"),
-        ))
-        print(">>> promptmap2 เสร็จแล้ว", flush=True)
-
     if "promptfoo" in tools:
-        ollama_url = target_config.get("base_url") or "http://localhost:11434"
         print(">>> เริ่ม promptfoo smoke test", flush=True)
-        results.append(smoke_test_promptfoo(
-            model_name=model_name,
-            ollama_url=ollama_url,
-        ))
+        results.append(smoke_test_promptfoo(model_name, ollama_url=ollama_url))
         print(">>> promptfoo เสร็จแล้ว", flush=True)
 
     return results
-
 
 def smoke_test_passed(results: list[dict]) -> bool:
     return all(r["ok"] for r in results)
@@ -226,7 +164,7 @@ if __name__ == "__main__":
     target_config = {
         "type": "ollama",
         "model": "llama3.2:1b",
-        "base_url": "http://localhost:11434"
+        "base_url": DEFAULT_OLLAMA_URL,
     }
 
     print("🚀 เริ่มรัน Smoke Test...\n")
@@ -250,9 +188,8 @@ if __name__ == "__main__":
         mock_api_report = {
             "summary": summary,
             "tool_plan": {
-                "garak": ["LLM01", "LLM02", "LLM09"],
-                "promptmap2": ["LLM07"],
-                "promptfoo": ["LLM01", "LLM02", "LLM06", "LLM07", "LLM09"],
+                "garak": ["LLM01", "LLM02"],
+                "promptfoo": ["LLM07", "LLM10"],
             },
             "raw_count": len(all_raw_rows),
             "raw_sample_first_2_rows": all_raw_rows[:2]  # โชว์โครงสร้าง raw data เป็นตัวอย่าง

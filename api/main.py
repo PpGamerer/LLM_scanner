@@ -23,7 +23,7 @@ file (garak_scan_*.report.jsonl, promptmap2_scan_*.json) ลง project root ต
 กลางทาง (connection ที่ Streamlit poll ค้างอยู่จะโดนตัดกลางคัน) — ปิด --reload
 ตอนทดสอบสแกนจริง หรือ --reload-exclude โฟลเดอร์ที่เขียน report ออกไป
 """
-
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -77,14 +77,9 @@ class SmokeTestRequest(BaseModel):
     tools: list[str] | None = None  # เช่น ["garak"] ถ้าอยากทดสอบแค่ tool เดียว — None = ทุก tool ที่มี
 
 
-def _execute_scan(
-    job_id: str,
-    target_config: dict,
-    owasp_categories: list[str] | None,
-    depth: str,
-    tool_overrides: dict[str, str] | None,
-):
+def _execute_scan(job_id, target_config, owasp_categories, depth, tool_overrides):
     JOBS[job_id]["status"] = "running"
+    JOBS[job_id]["started_at"] = time.time()
 
     def on_progress(done, total, label):
         JOBS[job_id]["progress"] = {"done": done, "total": total, "label": label}
@@ -98,18 +93,21 @@ def _execute_scan(
             on_progress=on_progress,
         )
         summary = summarize_by_owasp(rows)
-        JOBS[job_id]["status"] = "done"
-        # scan_id = ชื่อโฟลเดอร์ results/<scan_id>/ ที่มี report.html/.json/.csv +
-        # ไฟล์ดิบของแต่ละ tool อยู่จริง — เดิมไม่เก็บ/ส่งค่านี้เลย ทำให้ผู้ใช้หา
-        # ไฟล์ที่เซฟไว้บนเครื่อง backend ไม่เจอ (ต้องพึ่งแต่ report ที่ build ใหม่
-        # ใน memory ผ่าน /scan/{job_id}/report ซึ่งหายไปถ้า restart backend)
+
+        p = JOBS[job_id].get("progress")
+        if p:
+            on_progress(p["total"], p["total"], "เสร็จสิ้น")
+
         JOBS[job_id]["result"] = {
             "raw": rows,
             "summary": summary,
             "tool_plan": tool_plan,
             "scan_id": scan_id,
         }
-    except Exception as e:  # noqa: BLE001 — MVP: เก็บ error message ไว้โชว์ผู้ใช้
+        JOBS[job_id]["finished_at"] = time.time()
+        JOBS[job_id]["status"] = "done"   # ตั้งหลังสุด
+    except Exception as e:  # noqa: BLE001
+        JOBS[job_id]["finished_at"] = time.time()
         JOBS[job_id]["status"] = "failed"
         JOBS[job_id]["error"] = str(e)
 
@@ -153,6 +151,9 @@ def start_scan(req: ScanRequest, background_tasks: BackgroundTasks):
     JOBS[job_id] = {
         "status": "queued",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": None,
+        "finished_at": None,
+        "progress": None,
         "result": None,
         "error": None,
     }
@@ -168,8 +169,17 @@ def get_status(job_id: str):
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="ไม่พบ job นี้")
-    return {"job_id": job_id, "status": job["status"], "error": job.get("error")}
 
+    started = job.get("started_at")
+    elapsed = int((job.get("finished_at") or time.time()) - started) if started else None
+
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "error": job.get("error"),
+        "progress": job.get("progress"),
+        "elapsed_sec": elapsed,
+    }
 
 @app.get("/scan/{job_id}/report")
 def get_report(job_id: str):

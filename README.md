@@ -5,7 +5,7 @@
 ## แนวคิดหลัก: ระบบเลือก tool ให้เอง ไม่ใช่ user เลือก (แต่ override ได้)
 
 User เลือกแค่ **target** (Ollama model) และ **OWASP category ที่อยากทดสอบ**
-(เช่น LLM01, LLM07) — ไม่ต้องรู้จัก Garak/promptmap2/Promptfoo/Giskard/PyRIT เลย
+(เช่น LLM01, LLM07) — ไม่ต้องรู้จักเครื่องมืออย่าง Garak หรือ Promptfoo เลย
 ก็สแกนได้ทันที
 
 `core/selector.py` คือส่วนที่ตัดสินใจแทน user ผ่าน 2 dict แยกกัน (**ดีไซน์ปัจจุบัน
@@ -29,6 +29,8 @@ CATEGORY_DEFAULT_TOOL = {
     "LLM06": "promptfoo", "LLM07": "promptfoo", "LLM09": "garak", "LLM10": "promptfoo",
 }
 ```
+
+> UI โชว์เฉพาะหมวดใน `PROTOTYPE_CATEGORIES` (ดูหัวข้อ "สถานะตอนนี้") ไม่ใช่ครบ 7 หมวดข้างบน
 
 ของเดิม (ก่อนรอบ 7) ใช้ `CATEGORY_TOOL_MAP` เป็น `{category: [tool, tool, ...]}`
 เดียว ตั้งใจให้รันทุก tool ใน list "พร้อมกันเสมอ" เพื่อ cross-validate — แต่ในทาง
@@ -72,8 +74,8 @@ probes.dan,probes.encoding` สำหรับ LLM01) ห้ามใช้ `tag
 
 ตอนแรกคิดว่า `web_injection` ทั้ง family ควรอยู่ LLM01 (ผูกไว้แบบนั้นมาตั้งแต่ต้น) —
 verify จาก `garak` tag metadata จริง (`--plugin_info`, เทียบกับ CSV export) แล้วพบว่า
-**ผิด**: ทุก subclass ของ `web_injection` มี tag `owasp:llm02;owasp:llm06` (ฉบับ 2023)
-ไม่มีตัวไหนติด `owasp:llm01` เลย แปลเป็นฉบับ 2025 คือ **LLM05 (Improper Output
+**ผิด**: ทุก subclass ของ `web_injection` มี tag `owasp:llm02;owasp:llm06` (ฉบับ
+2023) ไม่มีตัวไหนติด `owasp:llm01` เลย แปลเป็นฉบับ 2025 คือ **LLM05 (Improper Output
 Handling) + LLM02 (Sensitive Info Disclosure) คู่กันทุก subclass** ไม่ใช่ LLM01
 
 ระหว่างแก้ยังเจอรายละเอียดเพิ่มอีก 2 รอบ:
@@ -103,8 +105,7 @@ Handling) + LLM02 (Sensitive Info Disclosure) คู่กันทุก subcla
 เอกสารเปรียบเทียบของทีมที่บอกว่า active — verify ซ้ำกับ `--list_probes` วันที่
 2026-10-02 ยืนยันชัดว่า `HijackHateHumans`/`HijackKillHumans`/`HijackLongPrompt`
 **active จริงทั้ง 3 ตัว** มีแค่ 3 ตัว `*Full` เท่านั้นที่ dormant (pattern เดียวกับทุก
-family อื่นในระบบ) — ข้อมูลที่เคยเห็นว่า "dormant หมด" เป็นการอ่าน/บันทึกผิดพลาดจาก
-แหล่งอื่น ไม่ใช่สถานะจริงของ garak — `"promptinject": "LLM01"` ถูกต้องตามเดิม
+family อื่นในระบบ) — `"promptinject": "LLM01"` ถูกต้องตามเดิม
 
 ## บั๊กที่ต้องจำไว้: probe เดียวตรงได้มากกว่า 1 category (dual-category probes)
 
@@ -133,10 +134,10 @@ source of truth ตัวเดียว — ทั้ง `garak_probes_for_owas
 `web_injection`, `exploitation`) ด้วย `--plugin_info` ตรงจากซอร์สแล้วรอบสิบสอง ปิดเป็น
 resolved ทั้งหมด ไม่ต้อง verify ซ้ำอีก**
 
-## Promptfoo — ✅ verify แล้ว (ไม่ใช่ "ยังไม่เคยรันจริง" อีกต่อไป)
+## Promptfoo — ✅ verify แล้ว
 
-ต่างจาก garak/promptmap2 (Python, เรียกผ่าน venv python.exe) ตรงที่ **Promptfoo เป็น
-Node.js CLI** ติดตั้งแยกจาก python venv ของโปรเจกต์นี้โดยสิ้นเชิง ต้องมี Node.js/npm
+ต่างจาก garak (Python, เรียกผ่าน venv python.exe) ตรงที่ **Promptfoo เป็น Node.js
+CLI** ติดตั้งแยกจาก python venv ของโปรเจกต์นี้โดยสิ้นเชิง ต้องมี Node.js/npm
 บนเครื่อง (หรือใน container ของ backend) ก่อน:
 
 ```bash
@@ -146,31 +147,37 @@ npm install -g promptfoo
 ```
 
 Promptfoo เป็น **config-driven** (ไม่ใช่ CLI flag ล้วนแบบ garak) — `promptfoo_runner.py`
-generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่ต้องการ 
+generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่ต้องการ
 แล้วเรียกสองขั้น: `promptfoo redteam generate -c <config>.yaml -o <redteam>.yaml --no-cache`
 ตามด้วย `promptfoo redteam eval -c <redteam>.yaml -o <output>.json -o <output>.html --no-cache`
 (แยกสองขั้นเพื่อไม่ให้ path ของ HTML report ถูกส่งไปเป็น config)
 
 **สถานะ ณ ตอนนี้ — ✅ verify ผ่านจริงแล้ว หลายรอบ:**
-- รันจริงสำเร็จจนจบหลายรอบ (ไม่ใช่แค่ครั้งเดียว) — ปัญหา `ENOENT` ที่เคยเจอตอนแรก
-  ไม่ใช่จากโค้ดเรา แก้แล้ว
-- `numTests` ต่อ plugin ปรับผ่าน env var ได้แล้ว: `PROMPTFOO_QUICK_TESTS` (depth
+- รันจริงสำเร็จจนจบหลายรอบ — ปัญหา `ENOENT` ที่เคยเจอตอนแรกไม่ใช่จากโค้ดเรา แก้แล้ว
+- `numTests` ต่อ plugin ปรับผ่าน env var ได้: `PROMPTFOO_QUICK_TESTS` (depth
   "quick", default 10) / `PROMPTFOO_DEEP_TESTS` (depth "deep", default 50)
-- **grader model แยกจาก target model แล้ว** ผ่าน env var `PROMPTFOO_GRADER_MODEL`
-  (default `"dolphin3"`) — ไม่ใช้ target model ตัดสินผลตัวเอง
+- **grader model แยกจาก target model** ผ่าน env var `PROMPTFOO_GRADER_MODEL`
+  (default ในโค้ดคือ `"dolphin3"`; แนะนำ `llama-guard3:1b`) — ⚠️ ดูข้อควรระวังเรื่อง
+  ค่าว่างในหัวข้อ "ตัวแปรสภาพแวดล้อม"
+- **strategies ปรับผ่าน env var `PROMPTFOO_STRATEGIES`** (คอมม่าคั่น) — **ค่าเริ่มต้นคือ
+  ว่าง = ไม่ใช้ strategy เลย** (`"strategies": []`) เพื่อไม่ให้ default strategies ของ
+  promptfoo คูณจำนวน test จนบวม (เคยเจอ 232 tests แทนที่จะเป็น 1) ถ้าตั้งค่า เช่น
+  `PROMPTFOO_STRATEGIES=base64,rot13` จำนวน test จะคูณตามจำนวน strategy ที่เปิด
+  (ผลคูณกับ plugin × `numTests`) ใช้เวลานานขึ้นมาก ดูชื่อ strategy ที่ใช้ได้ใน doc ของ
+  promptfoo — ชื่อผิดจะ error ตอนขั้น generate
 - **exit-code handling ถูกต้องแล้ว**: promptfoo คืน exit code 100 ในบางกรณีที่ไม่ใช่
-  error จริง (เช่น มี test ที่ fail ตามที่ตั้งใจ) — ของเดิมเคยถือว่า exit ≠ 0 คือ error
-  เสมอ แก้แล้วให้แยกแยะ 100 ออกจาก error code อื่นจริงๆ
+  error จริง (เช่น มี test ที่ fail ตามที่ตั้งใจ) — ขั้น eval อนุญาต `(0, 100)`
 - **pluginId prefix handle แล้ว**: promptfoo คืน pluginId พร้อม prefix
   `"promptfoo:redteam:"` นำหน้าบางที — `promptfoo_plugin_to_owasp()` ตัด prefix นี้
-  ออกก่อนเทียบกับ `PROMPTFOO_PLUGIN_OWASP_MAP` เสมอแล้ว กัน silent fallback เป็น
+  ออกก่อนเทียบกับ `PROMPTFOO_PLUGIN_OWASP_MAP` เสมอ กัน silent fallback เป็น
   Uncategorized (เจอจริงกับ `divergent-repetition`/LLM10 ที่เคยหายไปเงียบๆ)
-- แก้ bug ที่ `owasp:llm:01` เคยขยายเป็น 28 sub-plugin ไม่ใช่ 1 test อย่างที่ตั้งใจ
-  (default strategies ของ promptfoo คูณเข้าไปเองด้วย) — เติม `"strategies": []` ใน
-  `_build_config()` แล้ว + smoke test เปลี่ยนเป็น plugin เดี่ยวแทน preset
-- `system_prompt_path` เดียวกับที่ promptmap2 ใช้ ถูก reuse ให้ promptfoo's
-  `prompt-extraction` plugin ด้วย (ผ่าน `_resolve_system_prompt_file` ที่ import มาจาก
-  `promptmap2_runner.py` ตรงๆ ไม่เขียนซ้ำ) — ไม่ต้องเพิ่ม field ใหม่ใน UI
+- แก้ bug ที่ `owasp:llm:01` เคยขยายเป็น 28 sub-plugin ไม่ใช่ 1 test อย่างที่ตั้งใจ —
+  smoke test เปลี่ยนเป็น plugin เดี่ยวแทน preset
+- `system_prompt_path` ใช้กับ `prompt-extraction` plugin โดย import
+  `_resolve_system_prompt_file` จาก `promptmap2_runner.py` (⚠️ **ห้ามลบไฟล์นั้น** —
+  ดูหัวข้อ promptmap2) ลำดับหา: ไฟล์ที่ระบุเอง → `./promptmap/system-prompts.txt` →
+  ดึงจาก Ollama `/api/show` อัตโนมัติ (ถ้าไม่มี system prompt เลย ใช้
+  `"You are a helpful assistant."`)
 
 ใน Docker: `Dockerfile.backend` ติดตั้ง Node.js 22 + `promptfoo` ให้แล้ว (pin เวอร์ชันได้ด้วย
 `--build-arg PROMPTFOO_VERSION=x.y.z` หรือ `build.args` ใน compose — ควร pin เป็นเวอร์ชันที่ทดสอบแล้ว
@@ -180,32 +187,44 @@ generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่
 
 ตัดออกจาก `CATEGORY_CAPABLE_TOOLS["LLM07"]` แล้ว จึงไม่โผล่ใน UI และ
 `resolve_tool_plan()` จะเมิน `tool_overrides={"LLM07": "promptmap2"}` แล้ว fallback
-ไป default (promptfoo) 
+ไป default (promptfoo) — เหตุผลเดิม: เป็น side project คนเดียว ไม่มีองค์กรรับรอง และเคย
+มีบั๊กผลหายเงียบ LLM07 ยังครอบด้วย garak `sysprompt_extraction` และ promptfoo
+`prompt-extraction` สิ่งที่เสียคือ concept "prompt stealing" แบบเจาะจงของ promptmap2
 
 **ห้ามลบ `promptmap2_runner.py`** — `promptfoo_runner.py` import
 `_resolve_system_prompt_file` จากไฟล์นี้ ถ้าจะถอนถาวร ให้ย้ายฟังก์ชันนี้
 (+ `_fetch_ollama_system_prompt`, `DEFAULT_SYSTEM_PROMPT_PATH`) ไป `core/runners/common.py` ก่อน
 
-เปิดกลับ: เติม "promptmap2" ใน CATEGORY_CAPABLE_TOOLS["LLM07"] + เอาบล็อกคอมเมนต์
-clone promptmap ใน Dockerfile.backend กลับมา แล้วจำกัด rule_types ให้
-smoke_test_promptmap2() (ตอนนี้ไม่ส่ง rule_types เลย จึงรันทุก rule — ย้ายบั๊กนี้มาจากหัวข้อ Depth)
+**เปิดกลับ**: เติม `"promptmap2"` ใน `CATEGORY_CAPABLE_TOOLS["LLM07"]`, `git clone
+https://github.com/utkusen/promptmap` ไว้ที่ `./promptmap/`, เพิ่ม import และบล็อกรัน
+promptmap2 กลับใน `selector.py` (พร้อม `_progress`/`done_cats`), และถ้าจะให้ smoke test
+รองรับ ต้องเขียน `smoke_test_promptmap2()` ใหม่โดยส่ง `rule_types` (ของเดิมไม่ส่ง จึงรัน
+ทุก rule และเคยชน timeout 600s)
+
+### ประวัติ promptmap2 (ไว้อ้างอิงตอนเปิดกลับ)
+- `_parse_pass_rate` parse passed/total จาก string `"3/5"` ตรงๆ (verify กับ scan จริง LLM07)
+- `passed: false` = attack สำเร็จ (verify แล้ว) — polarity ตรงข้ามกับ promptfoo
+  (`success=True` = ป้องกันได้)
+- ไม่ระบุ `--controller-model` → ใช้ target model เป็น controller เอง ไม่ต้องมี `OPENAI_API_KEY`
+- `PROMPTMAP2_TYPE_OWASP_MAP` ใช้ชื่อ type จริง (`harmful`/`social_bias` ไม่ใช่
+  `harmful_content`/`bias`)
+- ส่ง `--rule-type` ตาม OWASP category ผ่าน `promptmap2_rule_types_for_owasp()`
+- `promptmap2_runner.py` เป็นตัว reuse resolver ของ system prompt ให้ promptfoo (ดูด้านบน)
 
 ## Timeout — ปิดไว้ตอนนี้ (ตั้งใจ ไม่ใช่บั๊ก)
 
-`selector.py` ส่ง `timeout_sec=None` ให้ทั้ง `run_garak_scan`/`run_promptmap2_scan`/
-`run_promptfoo_scan` และ `smoke_test.py` ก็ default `timeout_sec=None` เหมือนกัน —
-**ปิดไว้ตั้งใจ** เพราะเจอเคสจริงว่า promptmap2 อาจกินเวลานานเกิน 600s ได้ง่ายถ้า rule
-ในหมวดนั้นมีเยอะ (โดยเฉพาะ smoke test ที่ยังไม่ได้จำกัด `rule_types` เลยรันทุก rule
-ทุก type ทุกครั้ง) การปิด timeout แลกกับความเสี่ยงว่าถ้า subprocess ค้างจริง (เช่น
-Ollama ไม่ตอบ) job จะแขวนไม่มีวันจบเอง ต้อง kill เองถ้าเจอ
+`selector.py` ส่ง `timeout_sec=None` ให้ `run_garak_scan`/`run_promptfoo_scan`
+และ `smoke_test.py` ก็ default `None` เหมือนกัน — ปิดไว้ตั้งใจ เพราะเคยชน timeout 600s
+กับ promptmap2 (ปิดอยู่ตอนนี้) และ garak/promptfoo แบบ deep ก็ใช้เวลานานเป็นชั่วโมงได้
+การปิด timeout แลกกับความเสี่ยงว่าถ้า subprocess ค้างจริง (เช่น Ollama ไม่ตอบ)
+job จะแขวนไม่มีวันจบเอง ต้อง kill เอง
 
 ## Depth (quick / deep) — ใช้เฉพาะ "สแกนจริง" เท่านั้น
 
-`run_scan(..., depth="quick"|"deep")` ปรับ 3 จุด:
+`run_scan(..., depth="quick"|"deep")` ปรับ 2 จุด:
 - **จำนวน garak probe/category**: `quick` = probe ตัวแทน 1 ตัว/category
   (`GARAK_QUICK_PROBES`), `deep` = ทุก probe ที่ map ไว้ใน `GARAK_PROBE_OWASP_MAP`
   บวก probe dual-category ที่เกี่ยวข้อง (ดูหัวข้อ dual-category ด้านบน)
-- **promptmap2 iterations**: `quick` = 1, `deep` = 5
 - **promptfoo numTests ต่อ plugin**: `quick` = plugin ตัวแทน 1 ตัว/category
   (`PROMPTFOO_QUICK_PLUGINS`) × `PROMPTFOO_QUICK_TESTS` (default 10), `deep` = ทุก
   plugin ที่ map ไว้ × `PROMPTFOO_DEEP_TESTS` (default 50)
@@ -213,21 +232,64 @@ Ollama ไม่ตอบ) job จะแขวนไม่มีวันจบ�
 ค่าอื่นนอกจาก `"quick"`/`"deep"` จะเงียบๆ fallback เป็น `"deep"` ไม่ error ให้เห็น
 
 **Smoke test (`core/smoke_test.py`) ไม่รับ/ไม่ใช้ `depth` เลย** — hardcode ค่าเล็กสุด
-ตายตัวเสมอ (`probes=["test.Blank"]`, `promptmap2 iterations=1`,
-`promptfoo plugins=["harmful:hate"], num_tests=1`)
+ตายตัวเสมอ (`probes=["test.Blank"]`, `promptfoo plugins=["harmful:hate"], num_tests=1`)
+และรองรับ tool แค่ `garak`/`promptfoo` — ถ้าส่ง `tools` ที่ไม่รู้จัก (เช่น `promptmap2`)
+จะคืนผล fail พร้อมข้อความ ไม่ใช่ "ผ่านเปล่าๆ"
 
-✅ verify แล้ว: `smoke_test_garak()` ใช้ probe `"test.Blank"` ซึ่งเป็น probe ที่
-`--list_probes` โชว์เป็น 💤 (dormant) — ไม่เหมือน `propile` ที่ dormant ทั้ง family
-(ส่งชื่อ family เปล่าๆ แล้ว error) ตรงนี้ส่งชื่อ **เต็ม** `"test.Blank"` ตรงๆ (ไม่ใช่แค่
-`"test"`) ซึ่งตามหลักการ (probe ที่ sleeping ยังเรียกตรงๆ ด้วยชื่อเต็มได้ — ยืนยันแล้ว
-จาก pattern เดียวกันกับ `promptinject` subclass ที่ active เรียกตรงได้ปกติ) น่าจะรันได้
-ปกติ — **แต่ยังไม่เคยยืนยันจริงว่า garak ปฏิบัติกับ dormant probe ที่ถูกเรียกชื่อเต็ม
-ต่างจาก family เปล่าๆ จริงหรือเปล่า** ควรรัน smoke test จริงสักรอบแล้วเช็ค error log
-ก่อนเชื่อ 100%
+✅ verify แล้ว (Docker): `smoke_test_garak()` ใช้ `"test.Blank"` (ชื่อเต็ม) ซึ่งแม้
+`--list_probes` โชว์เป็น 💤 แต่เรียกตรงด้วยชื่อเต็มได้ปกติ ต่างจากการส่งชื่อ family
+เปล่าๆ ของ family ที่ dormant ทั้งตระกูล (เช่น `propile`) ที่ error
 
-**บั๊กที่รู้แล้วแต่ยังไม่แก้**: `smoke_test_promptmap2()` ไม่ได้ส่ง `rule_types` เลย ทำให้
-promptmap2 รันทุก rule ทุก type แทนที่จะเบาจริงๆ อย่างที่ตั้งใจ — นี่คือสาเหตุที่เคยชน
-timeout 600s มาก่อน (ตอนนี้ปิด timeout ไปแล้วเลยไม่ error แต่ก็ยังช้ากว่าที่ควรอยู่ดี)
+## Progress bar และเวลา
+
+`run_scan()` นับความคืบหน้าเป็น **รายหมวด** (`done_cats / total_cats`) แล้วเรียก
+`on_progress(done, total, label)` — `api/main.py` เก็บลง `JOBS[job_id]["progress"]` และ
+`GET /scan/{id}/status` คืน `progress` กับ `elapsed_sec` ให้ UI โชว์ % และเวลาที่ผ่านไป
+
+ตัวอย่าง: garak ดูแล LLM01+LLM02, promptfoo ดูแล LLM07+LLM10 → 0% → (garak จบ) 50% →
+(promptfoo จบ) 100%
+
+**ข้อจำกัด**: บาร์ขยับเมื่อ **tool จบทั้งก้อนเท่านั้น** เพราะ garak/promptfoo รันทุกหมวดใน
+subprocess เดียว (`subprocess.run(capture_output=True)` มองไม่เห็นข้างใน) ระหว่างรอ
+บาร์จะค้าง แต่ตัวเลข "รันมาแล้ว" ยังเดิน ถ้าอยากขยับทีละหมวดต้องรันแยกต่อหมวด (ระวัง
+probe dual-category รันซ้ำ และชื่อไฟล์ผลลัพธ์ชนกัน) หรือเปลี่ยนเป็น `Popen` อ่าน stdout
+
+## Unified report (`core/report.py`)
+
+- รูปแบบเอกสารทางการ มีสารบัญ เลขหัวข้อ กราฟเปรียบเทียบ tool ต่อ category (เฉพาะ
+  หมวดที่มีหลาย tool) และข้อแนะนำตาม OWASP (`OWASP_MITIGATIONS` เป็นแนวทางทั่วไป
+  ไม่ใช่การวิเคราะห์เจาะจงโมเดล)
+- หมวดที่มีหลาย tool จะมีปุ่มกรองตาม tool (vanilla JS ไม่ reload)
+- แถวที่มีตัวอย่างที่พัง (garak จาก `hitlog.jsonl`, promptfoo จาก test case ที่ fail)
+  มีปุ่มพับ "ดูตัวอย่างที่พัง" — จำกัด 3 ตัวอย่างต่อ probe/plugin
+- ท้ายรายงานมีลิงก์ไปไฟล์ต้นฉบับของแต่ละ tool (`garak_scan_<model>.report.html`,
+  `promptfoo_scan_<model>.html` ฯลฯ) เพราะรายงานรวม cap ตัวอย่างไว้ ลิงก์เป็น relative
+  path ที่ UI แปลงไปชี้ `/scan/{job_id}/files/...` ผ่าน `link_files_to_backend()`
+- ⚠️ ชื่อไฟล์ใน `_NATIVE_REFERENCE_FILES` ต้องตรงกับที่ runner ตั้งจริง ถ้า runner
+  เปลี่ยน naming ต้องแก้คู่กัน ไม่งั้นลิงก์ชี้ผิดไฟล์
+- Overall score อาจนับ probe dual-category ซ้ำ (LLM02+LLM05, LLM02+LLM10) — มีคำเตือนในรายงาน
+- `_dedupe_probe_stats()` กัน detector หลายตัวของ probe เดียวกันบวก pass/total ซ้ำ
+
+## ตัวแปรสภาพแวดล้อม
+
+| ตัวแปร | ใช้ที่ | ค่าเริ่มต้น / หมายเหตุ |
+|---|---|---|
+| `OLLAMA_URL` | backend, frontend | `http://ollama:11434` ใน compose (ค่าเริ่มต้นของช่อง Ollama Base URL) |
+| `PROMPTFOO_GRADER_MODEL` | backend | โค้ดใช้ `dolphin3` ถ้า**ไม่ได้ตั้ง**; แนะนำ `llama-guard3:1b` |
+| `PROMPTFOO_QUICK_TESTS` | backend | 10 (numTests ต่อ plugin ตอน quick) |
+| `PROMPTFOO_DEEP_TESTS` | backend | 50 (numTests ต่อ plugin ตอน deep) |
+| `PROMPTFOO_STRATEGIES` | backend | ว่าง = ไม่ใช้ strategy; คอมม่าคั่น เช่น `base64,rot13` (คูณจำนวน test) |
+| `PROMPTFOO_EMAIL` | backend | promptfoo redteam ถามอีเมลครั้งแรก — ต้องตั้ง ไม่งั้นอาจค้างรอ input |
+| `PROMPTFOO_USE_NPX` / `PROMPTFOO_PATH` | backend | ทางเลือกเรียก promptfoo (ไม่ต้องตั้งถ้าติดตั้ง global แล้ว) |
+| `BACKEND_URL` | frontend | `http://backend:8000` ใน compose |
+| `PUBLIC_BACKEND_URL` | frontend | `http://localhost:8000` — URL ที่ **เบราว์เซอร์** เข้าถึง backend ได้ (ใช้กับลิงก์ไฟล์ในรายงาน) ถ้าเปิดจากเครื่องอื่นต้องตั้งเป็น host จริง |
+
+⚠️ **ข้อควรระวัง `PROMPTFOO_GRADER_MODEL` ว่าง**: `docker-compose.yml` ส่งค่าด้วย
+`${PROMPTFOO_GRADER_MODEL:-}` ถ้าไม่ได้ตั้งใน `.env` ตัวแปรจะถูกส่งเข้า container เป็น
+**สตริงว่าง** (ไม่ใช่ "ไม่ได้ตั้ง") ทำให้ `os.environ.get("PROMPTFOO_GRADER_MODEL", "dolphin3")`
+ได้ `""` → `or None` → promptfoo ใช้ **target model ตัดสินผลตัวเอง** ซึ่งขัดกับเจตนาที่แยก
+grader — ต้องตั้งค่าใน `.env` ให้ชัด (เช่น `PROMPTFOO_GRADER_MODEL=llama-guard3:1b`) และ
+`ollama pull` โมเดลนั้นเข้า container ด้วย
 
 ## โครงสร้างไฟล์
 
@@ -237,30 +299,31 @@ llm_scanner/
 │   ├── generators/base.py       # target adapter (Ollama, OpenAI-compatible, Matthew)
 │   ├── runners/
 │   │   ├── garak_runner.py      # เรียก Garak (external tool)
-│   │   ├── promptmap2_runner.py # เรียก promptmap2 (external tool) — opt-in เท่านั้น
+│   │   ├── promptmap2_runner.py # ⏸ ปิดไว้ แต่ห้ามลบ (promptfoo_runner import _resolve_system_prompt_file จากไฟล์นี้)
 │   │   └── promptfoo_runner.py  # เรียก Promptfoo (external tool, Node.js) — ✅ verify แล้ว
 │   ├── parsers/
-│   │   ├── garak_parser.py      # แปลง garak report -> schema กลาง
-│   │   ├── promptmap2_parser.py # แปลง promptmap2 output -> schema กลาง
+│   │   ├── garak_parser.py      # แปลง garak report (+ hitlog) -> schema กลาง
+│   │   ├── promptmap2_parser.py # ⏸ ปิดไว้
 │   │   └── promptfoo_parser.py  # แปลง promptfoo output -> schema กลาง — ✅ verify แล้ว
 │   ├── owasp_mapping.py         # ผูก probe/rule/plugin <-> OWASP category (แหล่งความจริงเดียว)
 │   │                             # รวม GARAK_DUAL_CATEGORY_PROBES (probe ที่ตรง >1 category)
 │   ├── selector.py              # decision logic: category ไหนใช้ tool ไหน (entry point: run_scan())
 │   │                             # CATEGORY_CAPABLE_TOOLS/CATEGORY_DEFAULT_TOOL/resolve_tool_plan()
-│   ├── report.py                # รวมผลทุก tool เป็น HTML report เดียว + dedupe pass/total ต่อ probe
-│   │                             # (_dedupe_probe_stats() กัน detector หลายตัวบวกซ้ำ)
+│   ├── report.py                # รวมผลทุก tool เป็น HTML/JSON/CSV เดียว + dedupe pass/total ต่อ probe
 │   └── smoke_test.py            # สแกนจริงขนาดจิ๋วเช็ค pipeline ก่อนสแกนเต็ม
 ├── results/                       # ไฟล์ผลสแกนดิบทั้งหมด แยกโฟลเดอร์ต่อรอบสแกน:
 │                                  #   results/<scan_id>/report.html|.json|.csv +
 │                                  #   ไฟล์ดิบของแต่ละ tool (รวม promptfoo_config_*.yaml)
+│                                  #   (ใน Docker mount เป็น ./results:/app/results)
 ├── api/main.py                   # FastAPI: POST /scan (รับ tool_overrides ด้วย),
-│                                  #   GET /scan/{id}/status, GET /scan/{id}/report,
-│                                  #   GET /scan/{id}/report/html (ไฟล์จริงจากดิสก์)
-├── ui/app.py                     # Streamlit form + dropdown เลือก tool ต่อหมวด + unified report
-├── docker-compose.yml
-├── Dockerfile.backend             # Python 3.11 + Node.js 20 + promptfoo + garak + promptmap2
+│                                  #   GET /scan/{id}/status (progress + elapsed_sec),
+│                                  #   GET /scan/{id}/report, GET /scan/{id}/report/html,
+│                                  #   GET /scan/{id}/files/{filename}
+├── ui/app.py                     # Streamlit form + dropdown เลือก tool ต่อหมวด + progress % + unified report
+├── docker-compose.yml            # ollama + backend + frontend (volume: ollama-data, promptfoo-data)
+├── Dockerfile.backend             # Python 3.11 + Node.js 22 + promptfoo + garak (ต้องมี curl สำหรับ healthcheck)
 ├── Dockerfile.frontend            # streamlit อย่างเดียว ไม่ import core/
-├── .env.example                   # copy เป็น .env (grader model, จำนวน test ฯลฯ)
+├── .env.example                   # copy เป็น .env (grader model, จำนวน test, strategies ฯลฯ)
 ├── .dockerignore
 ├── requirements-backend.txt
 └── requirements-frontend.txt
@@ -271,89 +334,68 @@ llm_scanner/
 - ✅ **Garak + target type "ollama"** — implement ครบ ใช้งานได้จริงทั้งบนเครื่องและใน Docker
   (ต้องส่ง `--generator_options` ให้ทั้ง `OllamaGenerator` และ `OllamaGeneratorChat` — ดูหัวข้อ "วิธีรัน")
 - ✅ **Promptfoo + target type "ollama"** — verify กับการรันจริงแล้วหลายรอบ (ดูหัวข้อ
-  "Promptfoo" ด้านบน) build และรัน smoke test ผ่านแล้วใน Docker
+  "Promptfoo") build และรัน smoke test ผ่านแล้วใน Docker
+- ⏸ **promptmap2** — ปิดไว้ชั่วคราว (ดูหัวข้อ promptmap2)
 - ✅ **Field name ใน `garak_parser.py` — verify กับ report จริงแล้ว**: eval entry ของ garak
-  ใช้ `total_evaluated` (ไม่ใช่ `total` อย่างที่เดาไว้ตอนแรก) มี fallback ไป `total_processed` ด้วย
-  1 probe อาจมีหลาย eval entry ถ้าโดนเช็คด้วยหลาย detector (เก็บ field `detector` แยกไว้แล้ว)
+  ใช้ `total_evaluated` (ไม่ใช่ `total`) มี fallback ไป `total_processed` ด้วย 1 probe
+  อาจมีหลาย eval entry ถ้าโดนเช็คด้วยหลาย detector (เก็บ field `detector` แยกไว้แล้ว)
+- ✅ **garak ดึงตัวอย่างที่พังจาก `hitlog.jsonl`** (ไม่เกิน 3 ต่อ probe/detector) ให้
+  ความละเอียดเท่า promptfoo — ไม่มีไฟล์ hitlog = ไม่มีตัวอย่าง (ไม่ error)
 - ✅ **`report.py` มี `_dedupe_probe_stats()`** — กัน detector หลายตัวของ probe เดียวกัน
-  บวก pass/total ซ้ำกันตอนสรุปผล (1 probe ที่โดนเช็คด้วย 2 detector ไม่ควรถูกนับเป็น
-  2 เท่าของจำนวนจริง)
+  บวกซ้ำ
 - ✅ **`GARAK_PROBE_OWASP_MAP` + `GARAK_DUAL_CATEGORY_PROBES`** — verify กับ
   `garak --list_probes`/`--plugin_info` จริงหลายรอบ (v0.17.0, ล่าสุด 2026-10-02):
-  - `"xss"` ไม่มี probe family นี้จริง — แก้เป็น `"web_injection"` แล้ว ตอนนี้ map เข้า
-    **LLM05** (ไม่ใช่ LLM01 อย่างที่เคยผูกไว้ตอนแรก — ดูหัวข้อ "LLM05" ด้านบน) ผ่าน
-    bare family key + dual-category กับ LLM02 — **ยืนยันซ้ำด้วย `--plugin_info` ตรง
-    2026-10-02 แล้ว ปิดเป็น resolved**
-  - `"continuation"` ไม่มีจริง — เคยลองแก้เป็น `"propile"` แต่ verify แล้วพัง: ทุก
-    subclass เป็น dormant หมด garak error ทันที `"all plugins marked inactive"` —
-    เอาออกจาก mapping แล้ว ไม่หาตัวแทนใหม่ (leakreplay+divergence.Repeat พอแล้ว)
-  - `"ansiescape"` เคยลองผูกเข้า LLM05 แต่ verify แล้วว่าครอบ 3 category จริง (รวม
-    LLM03 ที่ไม่มีในระบบ) — เอาออกแล้ว (ดูหัวข้อ "LLM05" ด้านบน)
-  - `"divergence"` แยกระดับ subclass แล้ว (`.Repeat`→LLM02, `.RepeatedToken`→LLM10)
-    เพราะ 2 subclass นี้ต้องแยกคนละ category — ทั้งคู่ dual-category กับอีกฝั่งด้วย
-    (ดูหัวข้อ "บั๊กที่ต้องจำไว้" ด้านบน)
-  - ✅ **`promptinject` (LLM01) ปิดจบแล้ว** — active จริง 3/6 subclass (ไม่ใช่ dormant
-    ทั้ง family อย่างที่เคยกังวล) ยืนยันซ้ำกับ `--list_probes` 2026-10-02 แล้ว
-  - **บทเรียน**: ก่อนเพิ่ม probe family ใหม่เข้า mapping ต้องเช็ค (1) ไม่ใช่ dormant
-    ทั้ง family (เครื่องหมาย 💤 ทุกตัวใน `--list_probes`) และ (2) ไม่ใช่ dual-category
-    กับหมวดอื่นที่ยังไม่ได้ map ไว้ (เช็คด้วย `--plugin_info` หรืออ่าน `.tags` จาก
-    source ตรงๆ ไม่ใช่เดาจากชื่อ) — บทเรียนเดียวกันนี้ยังไม่ได้ apply กับ promptfoo
-    plugin ใหม่ เพราะยังไม่มีทางเช็ค "active/dormant" ของ promptfoo plugin ได้จนกว่า
-    จะรันจริง (ไม่มี `--list_probes` เทียบเท่าที่ตรวจไว้แล้ว)
-- ✅ **`_parse_pass_rate` ใน `promptmap2_parser.py` ใช้ตัวเลขจริงแล้ว**: ของเดิมทิ้งตัวเลข
-  passed จาก string `"3/5"` ไปเฉยๆ แก้ให้ parse ทั้ง passed/total จาก pass_rate string
-  ตรงๆ แล้ว — verify กับ scan จริง (LLM07) แล้วว่าตัวเลขรายแถวถูกต้อง
-- ✅ **polarity ของ `"passed"` ใน promptmap2 — verify กับ output จริงแล้ว**: `passed: false`
-  หมายถึง attack สำเร็จ (test failed) ตรงตามที่ logic invert ไว้เดิม
-- ✅ **promptmap2 controller model default — แก้ความเข้าใจผิดแล้ว**: ถ้าไม่ระบุ
-  `--controller-model` promptmap2 จะใช้ **target model ตัวเดียวกัน**เป็น controller ด้วย
-  ไม่ต้องมี `OPENAI_API_KEY` ก็รันได้
-- ✅ **`PROMPTMAP2_TYPE_OWASP_MAP` แก้ชื่อ type ผิดแล้ว**: ของเดิมเขียน `harmful_content`/`bias`
-  ซึ่งไม่ตรงกับ rule type จริงของ promptmap2 (`harmful`/`social_bias`) — แก้แล้ว
-- ✅ **promptmap2 ยิงเจาะจงตาม OWASP category ที่เลือกแล้ว**: ส่ง `--rule-type`
-  เข้า promptmap2 ตรงๆ ผ่าน `promptmap2_rule_types_for_owasp()`
-- ✅ **system prompt สำหรับ promptmap2 auto-resolve แล้ว** — ลำดับหา: ไฟล์ที่ระบุเอง
-  → `./promptmap/system-prompts.txt` ที่มากับ repo → ดึงจาก Ollama `/api/show`
-  อัตโนมัติ — `promptfoo_runner.py` reuse ฟังก์ชันเดียวกันนี้ด้วย
+  - `"xss"` ไม่มี probe family นี้จริง — แก้เป็น `"web_injection"` แล้ว map เข้า **LLM05**
+    ผ่าน bare family key + dual-category กับ LLM02
+  - `"continuation"` ไม่มีจริง — เคยลองแก้เป็น `"propile"` แต่ทุก subclass dormant
+    (`"all plugins marked inactive"`) — เอาออก ไม่หาตัวแทน (leakreplay+divergence.Repeat พอแล้ว)
+  - `"ansiescape"` ครอบ 3 category (รวม LLM03 ที่ไม่มีในระบบ) — เอาออก
+  - `"divergence"` แยกระดับ subclass (`.Repeat`→LLM02, `.RepeatedToken`→LLM10) และทั้งคู่
+    dual-category กับอีกฝั่ง
+  - **บทเรียน**: ก่อนเพิ่ม probe family ใหม่ต้องเช็ค (1) ไม่ใช่ dormant ทั้ง family
+    (💤 ใน `--list_probes`) และ (2) ไม่ใช่ dual-category กับหมวดอื่น (ใช้
+    `--plugin_info` หรืออ่าน `.tags` จาก source ไม่ใช่เดาจากชื่อ) — ยังไม่มีวิธีเช็ค
+    active/dormant ของ promptfoo plugin จนกว่าจะรันจริง
 - ✅ **`run_garak_scan(probes=[])` ไม่ fallback ไปยิง preset แล้ว**: เช็ค `probes is None`
   แทน `probes or ...` — `run_promptfoo_scan` เขียนตาม pattern เดียวกัน
-- ✅ **`run_scan()` คืนค่า `scan_id` แล้ว**: เซฟไฟล์ลง `results/<scan_id>/` และคืน
-  ชื่อโฟลเดอร์กลับมาด้วย เก็บไว้ใน `JOBS[job_id]["result"]["scan_id"]`
-- ✅ **Windows-safe**: garak/promptmap2 runner หา Python จาก `venv/Scripts/python.exe`
-  ถ้ามี และใช้ absolute path สำหรับ report/output เสมอ
-- ✅ **Unified HTML report ดึงจากไฟล์จริงแล้ว** — เพิ่ม `GET /scan/{job_id}/report/html`
-  ให้ UI ดึงไฟล์ที่เซฟไว้จริงบน `results/<scan_id>/report.html` ตรงๆ แทนการ
-  `build_report_html()` ใหม่ใน memory ทุกครั้ง (กันปัญหา stale-import/backend restart
-  แล้วหา report เก่าไม่เจอ) — `ui/app.py` ยังมีปุ่มแบบเดิม (build ใน memory + download
-  button) คู่กันไว้ด้วยเผื่ออยากดูแบบ inline เร็วๆ โดยไม่โหลดไฟล์
-- ✅ **`report.py`/`ui/app.py` วน loop ผ่าน `tool_plan`/`results` แบบ generic** —
-  ไม่ hardcode ชื่อ tool เลย เพิ่ม tool ใหม่ (promptfoo) โดยไม่ต้องแตะโค้ดส่วนแสดงผลเลย
-- ✅ **Smoke test** — ยิงสแกนจริงขนาดจิ๋ว (garak, promptfoo) ก่อนสแกนเต็มรูปแบบ
-  ต่อเข้า UI แล้ว (ปุ่ม "Run Smoke Test") verify ใน Docker แล้ว
+- ✅ **`run_scan()` คืนค่า `scan_id` แล้ว**: เซฟไฟล์ลง `results/<scan_id>/` เก็บไว้ใน
+  `JOBS[job_id]["result"]["scan_id"]`
+- ✅ **Windows-safe**: garak runner หา Python จาก `venv/Scripts/python.exe` ถ้ามี และใช้
+  absolute path สำหรับ report/output เสมอ
+- ✅ **Unified HTML report ดึงจากไฟล์จริง** — `GET /scan/{job_id}/report/html` คืน
+  `results/<scan_id>/report.html` ที่เซฟไว้ (กัน stale-import/backend restart)
+- ✅ **`report.py`/`ui/app.py` วน loop ผ่าน `tool_plan`/`results` แบบ generic** — เพิ่ม tool
+  ใหม่โดยไม่ต้องแตะโค้ดส่วนแสดงผล
+- ✅ **Smoke test** — garak + promptfoo ต่อเข้า UI แล้ว (ปุ่ม "Run Smoke Test") verify ใน Docker แล้ว
+- ✅ **Progress bar รายหมวด + `elapsed_sec`** — ดูหัวข้อ "Progress bar และเวลา"
 - ✅ **โหมด `depth="deep"` verify แล้วกับข้อมูลจริง (2026-10)**: รัน deep mode ครบ
-  ทุกหมวด (LLM01/02/05/06/07/09/10) จนจบสำเร็จ — ยืนยัน GARAK_DUAL_CATEGORY_PROBES/
-  _expand_dual_category_garak_rows()/_dedupe_probe_stats() ทำงานถูกต้องร่วมกัน
-  ตรวจสอบเลขย้อนกลับแล้วตรง 100%: divergence.Repeat โผล่ถูกทั้ง LLM02+LLM10,
-  web_injection/exploitation โผล่ถูกทั้ง LLM02+LLM05, summary ของ LLM10 (34/86)
-คำนวณจากแถวดิบได้ตรงเป๊ะ
+  ทุกหมวด (LLM01/02/05/06/07/09/10) จนจบ — ยืนยัน `GARAK_DUAL_CATEGORY_PROBES`/
+  `_expand_dual_category_garak_rows()`/`_dedupe_probe_stats()` ทำงานถูกต้องร่วมกัน
+  ตรวจเลขย้อนกลับแล้วตรง 100% (เช่น summary ของ LLM10 = 34/86 คำนวณจากแถวดิบตรงเป๊ะ)
+- ⚠️ **`PROTOTYPE_CATEGORIES = [LLM01, LLM02, LLM07, LLM10]`** ใน `selector.py`: LLM05/06/09
+  ซ่อนจาก UI และค่า default (เพราะยังไม่ผ่านการทดสอบเทียบแบบเป็นระบบ) แต่ยังเรียกผ่าน
+  `POST /scan` ได้ตรงๆ เปิดกลับโดยแก้ list นี้บรรทัดเดียว
+- ❌ **`GET /scan/{id}/report/csv` ยังไม่มีใน `api/main.py`** — `ui/app.py` เรียก endpoint
+  นี้เพื่อทำปุ่ม "ดาวน์โหลด CSV (ทุกแถว)" เมื่อไม่มี route จะได้ 404 ปุ่มเลยไม่โผล่
+  (ไม่ error) ไฟล์ `results/<scan_id>/report.csv` ถูกสร้างแล้ว แค่ขาด route คืนไฟล์
 - ❌ **target type "openai_compatible" / "matthew"** — ยังไม่ implement ใน `selector.py`
-  จะ raise `NotImplementedError` ถ้าเรียกใช้ตอนนี้ **บั๊กที่พบเพิ่ม**: `ui/app.py` มีให้
-  เลือก provider `"openai_compatible"` ในดรอปดาวน์ด้วย แต่ไม่มี input field
-  (`base_url`/`api_key`/`model`) ให้เลยสักช่อง — ยังไม่ได้แก้ (นอกสโคป ollama-only
-  ตอนนี้ — ถ้าจะเปิด ต้องแก้ `promptfoo_runner._build_config` ด้วย เพราะ hardcode
-  provider id เป็น `"ollama:chat:<model>"`)
-- ❌ **Giskard / PyRIT runner** — ยังไม่ได้เขียน มีแค่โครง comment ว่าจะต่อตรงไหน
-  (นี่คือจุดที่ `LLM08` ต้องรอ)
-- ⚠️ **Job storage เป็น in-memory dict** ใน `api/main.py` — ถ้า restart backend
-  ประวัติ job หาย พอสำหรับเดโม ถ้าต้องการ persist จริงจังค่อยเปลี่ยนเป็น SQLite
+  จะ raise `NotImplementedError` **บั๊กที่พบเพิ่ม**: `ui/app.py` มีให้เลือก provider
+  `"openai_compatible"` แต่ไม่มี input field (`base_url`/`api_key`/`model`) ให้เลย —
+  ถ้าจะเปิด ต้องแก้ `promptfoo_runner._build_config` ด้วย เพราะ hardcode provider id
+  เป็น `"ollama:chat:<model>"`
+- ❌ **PyRIT runner** — ยังไม่ได้เขียน (นี่คือจุดที่ `LLM08` ต้องรอ)
+- ⚠️ **Job storage เป็น in-memory dict** ใน `api/main.py` — restart backend แล้วประวัติ job
+  หาย (ผลที่เซฟไว้ใน `results/` ยังอยู่) พอสำหรับเดโม
+- ⚠️ **ไม่มี auth** — port 8000/8501 publish ทุก interface และ API สั่งสแกนได้
 
 ## วิธีรัน (Ollama รันเป็น service ใน compose)
 
 ```bash
-  cp .env.example .env          # ใส่ PROMPTFOO_EMAIL ด้วย (promptfoo redteam ถามอีเมลครั้งแรก)
-  docker compose up --build
-  docker compose exec ollama ollama pull llama-guard3:1b   # grader(แนะนำllama-guard3:1b) และเพิ่มโมเดลที่จะสแกน
+cp .env.example .env          # ตั้ง PROMPTFOO_EMAIL และ PROMPTFOO_GRADER_MODEL ให้ชัด
+docker compose up --build
+docker compose exec ollama ollama pull llama-guard3:1b   # grader (แนะนำ) แล้ว pull โมเดลที่จะสแกนเพิ่ม
 ```
+
 port 8000 (backend) และ 8501 (frontend) ถูก publish ที่ทุก interface (`"8000:8000"`, `"8501:8501"`)
 API ไม่มี auth และสั่งรันสแกนได้ ถ้าอยู่บนเครือข่ายที่ไม่ไว้ใจ ให้แก้ `ports` ใน `docker-compose.yml`
 เป็น `"127.0.0.1:8000:8000"` / `"127.0.0.1:8501:8501"`
@@ -362,8 +404,14 @@ Node.js กับ promptfoo ติดตั้งใน image ให้แล้
 
 เปิดเบราว์เซอร์ไปที่ `http://localhost:8501`
 
-**Ollama**: compose รัน Ollama เป็น service `ollama` เอง (volume `ollama-data`) ทั้ง backend และ frontend
-ใช้ `OLLAMA_URL=http://ollama:11434` (ตั้งใน `.env`) เป็นค่าเริ่มต้นของช่อง "Ollama Base URL" —
+**ลำดับเริ่มใน compose**: `ollama` ต้อง healthy (`ollama list`) ก่อน → `backend` ขึ้น
+(healthcheck `curl /health` — ต้องมี `curl` ใน image) → `frontend` ขึ้นตามหลัง
+**volume**: `ollama-data` เก็บโมเดลที่ pull ไว้, `promptfoo-data` (`/root/.promptfoo`) เก็บ
+state ของ promptfoo (เช่นอีเมลที่ให้ไว้) ไม่ต้องกรอกใหม่ทุกครั้งที่ rebuild,
+`./results` mount เป็น `/app/results` ให้ไฟล์ผลสแกนอยู่บนเครื่อง host
+
+**Ollama**: compose รัน Ollama เป็น service `ollama` เอง ทั้ง backend และ frontend
+ใช้ `OLLAMA_URL=http://ollama:11434` เป็นค่าเริ่มต้นของช่อง "Ollama Base URL" —
 ต้อง `ollama pull` โมเดลที่จะสแกนและ grader เข้า container นี้ก่อน
 
 ถ้าอยากใช้ Ollama บนเครื่อง host แทน ให้ตั้ง `OLLAMA_URL=http://host.docker.internal:11434`,
@@ -372,10 +420,12 @@ Node.js กับ promptfoo ติดตั้งใน image ให้แล้
 
 **garak ไม่อ่าน env และต้องส่ง host เอง**: `OllamaGenerator` มี default `127.0.0.1:11434`
 และ garak v0.17.0 สร้าง `OllamaGeneratorChat` (subclass) จริงตอนใช้ `--model_type ollama`
-จึงต้องส่ง `--generator_options` ที่ตั้ง `host` ให้ **ทั้งสองคลาส** (`OllamaGenerator` และ
-`OllamaGeneratorChat`) ถ้าตั้งแค่คลาสแรก garak จะต่อ `127.0.0.1` ใน container ตัวเองแล้ว
-ขึ้น `ConnectionError: Failed to connect to Ollama` (ดูได้จาก `connect_tcp.started host='127.0.0.1'`
-ใน `/root/.local/share/garak/garak.log`)
+จึงต้องส่ง `--generator_options` ที่ตั้ง `host` ให้ **ทั้งสองคลาส** ถ้าตั้งแค่คลาสแรก
+garak จะต่อ `127.0.0.1` ใน container ตัวเองแล้วขึ้น `ConnectionError: Failed to connect to
+Ollama` (ดูได้จาก `connect_tcp.started host='127.0.0.1'` ใน
+`/root/.local/share/garak/garak.log`)
+
+หลังแก้โค้ด ต้อง `docker compose up --build` ใหม่ (โค้ดถูก bake ใน image ไม่ได้ mount เป็น volume)
 
 ## รันแบบไม่ใช้ Docker (debug ง่ายกว่าตอนพัฒนา)
 
@@ -393,15 +443,21 @@ pip install -r requirements-frontend.txt
 streamlit run ui/app.py
 ```
 
-ก่อนรันเต็มรูปแบบ แนะนำรัน smoke test ก่อน:
+ก่อนรันเต็มรูปแบบ แนะนำรัน smoke test ก่อน (ใน container ต้องใช้ `base_url` เป็น
+`http://ollama:11434` — `core/smoke_test.py` อ่านจาก `OLLAMA_URL` อยู่แล้ว แต่ `__main__`
+ยัง hardcode ชื่อโมเดล `llama3.2:1b` ให้แก้ให้ตรงกับโมเดลที่ pull ไว้):
 
 ```bash
 python -m core.smoke_test
 ```
 
 ## Next steps
-1. รันสแกน quick จริงใน Docker เพื่อเช็ค promptfoo + grader ผ่าน Ollama ใน container
-2. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
-3. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
-4. เติม target type `openai_compatible`/`matthew`
-5. เปลี่ยน job storage จาก in-memory dict เป็น SQLite
+1. เพิ่ม route `GET /scan/{job_id}/report/csv` ใน `api/main.py` (คืน `results/<scan_id>/report.csv`)
+2. ตั้ง `PROMPTFOO_GRADER_MODEL` ใน `.env` ให้ชัด แล้วรันสแกน quick จริงใน Docker เพื่อเช็ค
+   promptfoo + grader ผ่าน Ollama ใน container
+3. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
+4. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
+5. เติม target type `openai_compatible`/`matthew`
+6. เปลี่ยน job storage จาก in-memory dict เป็น SQLite
+7. ล้าง docstring/comment ที่ยังอ้าง promptmap2 ใน `api/main.py` (docstring หัวไฟล์,
+   `TargetConfig`) และ docstring หัวไฟล์ `selector.py` (ส่วน "รอบเจ็ด")

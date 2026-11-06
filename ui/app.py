@@ -251,6 +251,18 @@ if st.button("Start Scan", type="primary"):
 def watch_job(job_id):
     """poll สถานะทุก 3 วินาทีแบบไม่บล็อกสคริปต์ พอ job จบ/ล้ม/หาย ก็สั่งวาดทั้งหน้าใหม่"""
     code, info = api_get(f"/scan/{job_id}/status")
+
+    def fmt_elapsed(sec: int | None) -> str:
+        if sec is None:
+            return "-"
+        h, rem = divmod(sec, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h} ชม. {m} นาที"
+        if m:
+            return f"{m} นาที {s} วินาที"
+        return f"{s} วินาที"
+
     if code is None:
         st.warning("ต่อ backend ไม่ได้ชั่วคราว กำลังลองใหม่ (สแกนยังรันอยู่ที่ backend)")
         return
@@ -258,13 +270,14 @@ def watch_job(job_id):
         st.rerun()
     p = info.get("progress")
     if p and p.get("total"):
+        pct = int(min(p["done"] / p["total"], 1.0) * 100)
         st.progress(
-            min(p["done"] / p["total"], 1.0),
-            text=f"{p['label']} ({p['done']}/{p['total']} ขั้น)",
+            pct / 100,
+            text=f"{p['label']} — {pct}% ({p['done']}/{p['total']} หมวด)",
         )
     st.info(
-        f"สถานะ: {info.get('status')} — เก็บลิงก์หน้านี้ไว้ได้ "
-        "ปิดแล้วเปิดใหม่ก็กลับมาดูต่อได้"
+        f"สถานะ: {info.get('status')} | รันมาแล้ว {fmt_elapsed(info.get('elapsed_sec'))} — "
+        "เก็บลิงก์หน้านี้ไว้ได้ ปิดแล้วเปิดใหม่ก็กลับมาดูต่อได้"
     )
 
 
