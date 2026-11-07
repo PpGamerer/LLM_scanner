@@ -207,7 +207,7 @@ def run_scan(
     ollama_url = target_config.get("base_url") or DEFAULT_OLLAMA_URL
     promptfoo_num_tests = _env_int("PROMPTFOO_QUICK_TESTS", 10) if depth == "quick" \
         else _env_int("PROMPTFOO_DEEP_TESTS", 50)
-    _PROMPTFOO_GRADER_MODEL = os.environ.get("PROMPTFOO_GRADER_MODEL", "dolphin3") or None
+    _PROMPTFOO_GRADER_MODEL = os.environ.get("PROMPTFOO_GRADER_MODEL", "qwen2.5:3b") or None
 
     # 2. Garak
     if "garak" in tool_plan:

@@ -8,20 +8,19 @@ user เลือกแค่ "OWASP category ที่อยากทดสอ�
 
 มี 2 ประเภท job:
     - /scan            = สแกนเต็มรูปแบบ (อาจใช้เวลาเป็นชั่วโมง)
-    - /scan/smoke-test  = สแกนจิ๋ว ยิงจริงแต่ย่อ (garak 1 probe, promptmap2 1 iteration)
-                          ใช้เช็คว่า pipeline พร้อมก่อนสั่งสแกนเต็มรูปแบบ — เก็บ job แยก dict
-                          (SMOKE_JOBS) กัน job สองแบบปนกัน แต่ pattern เดียวกันทุกอย่าง
+    - /scan/smoke-test  = สแกนจิ๋ว ยิงจริงแต่ย่อ (garak 1 probe, promptfoo 1 plugin 1 test)
+                        ใช้เช็คว่า pipeline พร้อมก่อนสั่งสแกนเต็มรูปแบบ — เก็บ job แยก dict
+                        (SMOKE_JOBS) กัน job สองแบบปนกัน แต่ pattern เดียวกันทุกอย่าง
+                        ไฟล์ดิบเซฟที่ results/smoke/<เวลา>_<โมเดล>/
 
 หมายเหตุ: เก็บ job status ใน memory (dict) เพื่อความง่ายของ MVP นี้ —
 ถ้า container restart job history จะหาย ถ้าต้องการ persist จริงจัง
 ค่อยเปลี่ยนเป็น SQLite ทีหลัง (ไม่กระทบ endpoint ด้านนอก)
 
-หมายเหตุสำคัญ: ถ้ารัน uvicorn ด้วย --reload ตอน dev — core/runners เขียน report
-file (garak_scan_*.report.jsonl, promptmap2_scan_*.json) ลง project root ตรงๆ
-ระหว่างสแกน (ทั้งสแกนเต็มรูปแบบและ smoke test) ถ้า reload watcher เฝ้าดู
-โฟลเดอร์เดียวกัน ไฟล์ใหม่ที่โผล่ขึ้นมากลางสแกนจะทำให้ server รีสตาร์ทตัวเอง
-กลางทาง (connection ที่ Streamlit poll ค้างอยู่จะโดนตัดกลางคัน) — ปิด --reload
-ตอนทดสอบสแกนจริง หรือ --reload-exclude โฟลเดอร์ที่เขียน report ออกไป
+หมายเหตุสำคัญ: ถ้ารัน uvicorn ด้วย --reload ตอน dev — core/runners เขียนไฟล์ผล
+(garak_scan_*.report.jsonl, promptfoo_scan_*.json ฯลฯ) ลง results/ ระหว่างสแกน
+(ทั้งสแกนเต็มรูปแบบและ smoke test) ถ้า reload watcher เฝ้าดูโฟลเดอร์นี้ด้วย server
+จะรีสตาร์ทตัวเองกลางทาง — ใช้ --reload-exclude "results/*" หรือปิด --reload
 """
 import time
 import uuid
@@ -54,8 +53,8 @@ class TargetConfig(BaseModel):
     base_url: str | None = None
     api_key: str | None = None
     model: str
-    # ใช้เฉพาะตอน promptmap2 ถูกเลือก (LLM07) — เดิม TargetConfig ไม่มี field พวกนี้
-    # แต่ core/runners/promptmap2_runner.py อ่านจาก target_config.get(...) อยู่แล้ว
+    # system_prompt_path ใช้กับ promptfoo (prompt-extraction/LLM07) ส่วน
+    # controller_model/controller_model_type รอไว้ใช้ตอนเปิด promptmap2 กลับมา
     system_prompt_path: str | None = None
     controller_model: str | None = None
     controller_model_type: str | None = None
@@ -232,6 +231,16 @@ def get_report_html_file(job_id: str):
     if not html_path.exists():
         raise HTTPException(status_code=404, detail="ไม่พบไฟล์ report.html บน backend")
     return FileResponse(html_path, media_type="text/html")
+
+@app.get("/scan/{job_id}/report/csv")
+def get_report_csv_file(job_id: str):
+    job = JOBS.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(status_code=404, detail="ไม่พบ report หรือยังไม่เสร็จ")
+    csv_path = RESULTS_DIR / job["result"]["scan_id"] / "report.csv"
+    if not csv_path.exists():
+        raise HTTPException(status_code=404, detail="ไม่พบไฟล์ report.csv บน backend")
+    return FileResponse(csv_path, media_type="text/csv")
 
 @app.get("/scan/{job_id}/files/{filename}")
 def get_scan_file(job_id: str, filename: str):

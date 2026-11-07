@@ -4,8 +4,10 @@ smoke_test.py — ทดสอบสแกนจริงขนาดจิ๋�
 
 import os
 import time
+from datetime import datetime
+from pathlib import Path
 
-from .runners.garak_runner import run_garak_scan
+from .runners.garak_runner import run_garak_scan, RESULTS_DIR
 from .runners.promptfoo_runner import run_promptfoo_scan
 
 DEFAULT_OLLAMA_URL = (
@@ -14,10 +16,17 @@ DEFAULT_OLLAMA_URL = (
     or "http://localhost:11434"
 )
 
+def _smoke_dir(model_name: str) -> Path:
+    safe = str(model_name).replace(":", "_").replace("/", "_").replace("\\", "_")
+    d = RESULTS_DIR / "smoke" / f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{safe}"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
 def smoke_test_garak(
     model_name: str,
     timeout_sec: int | None = None,
     ollama_url: str | None = None,
+    output_dir: Path | None = None,
 ) -> dict:
     """ยิง garak จริง แต่เลือก probe 'test' เพื่อเช็ค pipeline ให้เร็วที่สุด"""
     start = time.monotonic()
@@ -28,6 +37,7 @@ def smoke_test_garak(
             generations=1,
             timeout_sec=timeout_sec,
             ollama_url=ollama_url,
+            output_dir=output_dir,
         )
     except Exception as exc:
         return {
@@ -61,6 +71,7 @@ def smoke_test_promptfoo(
     model_name: str,
     ollama_url: str = "http://localhost:11434",
     timeout_sec: int | None = None,
+    output_dir: Path | None = None,
 ) -> dict:
     """ยิง promptfoo จริง 1 plugin (harmful:hate) 1 test เพื่อเช็ค pipeline เร็วที่สุด
     ไม่ใช้ plugin 'prompt-extraction' ตอน smoke test เพราะต้องมี system prompt กำกับ
@@ -82,6 +93,7 @@ def smoke_test_promptfoo(
             ollama_url=ollama_url,
             num_tests=1,
             timeout_sec=timeout_sec,
+            output_dir=output_dir,
         )
     except Exception as exc:
         return {
@@ -139,16 +151,17 @@ def run_smoke_test(target_config: dict, tools: list[str] | None = None) -> list[
 
     model_name = target_config["model"]
     ollama_url = target_config.get("base_url") or DEFAULT_OLLAMA_URL
+    out = _smoke_dir(model_name)
     results = []
 
     if "garak" in tools:
         print(">>> เริ่ม garak smoke test", flush=True)
-        results.append(smoke_test_garak(model_name, ollama_url=ollama_url))
+        results.append(smoke_test_garak(model_name, ollama_url=ollama_url, output_dir=out))
         print(">>> garak เสร็จแล้ว", flush=True)
 
     if "promptfoo" in tools:
         print(">>> เริ่ม promptfoo smoke test", flush=True)
-        results.append(smoke_test_promptfoo(model_name, ollama_url=ollama_url))
+        results.append(smoke_test_promptfoo(model_name, ollama_url=ollama_url, output_dir=out))
         print(">>> promptfoo เสร็จแล้ว", flush=True)
 
     return results

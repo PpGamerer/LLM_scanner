@@ -273,7 +273,7 @@ def watch_job(job_id):
         pct = int(min(p["done"] / p["total"], 1.0) * 100)
         st.progress(
             pct / 100,
-            text=f"{p['label']} — {pct}% ({p['done']}/{p['total']} หมวด)",
+            text=f"{p['label']} — {pct}% ({p['done']}/{p['total']} ขั้น)",
         )
     st.info(
         f"สถานะ: {info.get('status')} | รันมาแล้ว {fmt_elapsed(info.get('elapsed_sec'))} — "

@@ -157,8 +157,8 @@ generate ไฟล์ `promptfooconfig.yaml` เองตาม plugin ที่
 - `numTests` ต่อ plugin ปรับผ่าน env var ได้: `PROMPTFOO_QUICK_TESTS` (depth
   "quick", default 10) / `PROMPTFOO_DEEP_TESTS` (depth "deep", default 50)
 - **grader model แยกจาก target model** ผ่าน env var `PROMPTFOO_GRADER_MODEL`
-  (default ในโค้ดคือ `"dolphin3"`; แนะนำ `llama-guard3:1b`) — ⚠️ ดูข้อควรระวังเรื่อง
-  ค่าว่างในหัวข้อ "ตัวแปรสภาพแวดล้อม"
+  (default คือ `qwen2.5:3b` ต้อง `ollama pull` ก่อน) — ถ้าตั้งเป็นค่าว่างเอง
+  จะใช้ target model ตัดสินตัวเอง (ดูหัวข้อ "ตัวแปรสภาพแวดล้อม")
 - **strategies ปรับผ่าน env var `PROMPTFOO_STRATEGIES`** (คอมม่าคั่น) — **ค่าเริ่มต้นคือ
   ว่าง = ไม่ใช้ strategy เลย** (`"strategies": []`) เพื่อไม่ให้ default strategies ของ
   promptfoo คูณจำนวน test จนบวม (เคยเจอ 232 tests แทนที่จะเป็น 1) ถ้าตั้งค่า เช่น
@@ -275,21 +275,20 @@ probe dual-category รันซ้ำ และชื่อไฟล์ผล�
 | ตัวแปร | ใช้ที่ | ค่าเริ่มต้น / หมายเหตุ |
 |---|---|---|
 | `OLLAMA_URL` | backend, frontend | `http://ollama:11434` ใน compose (ค่าเริ่มต้นของช่อง Ollama Base URL) |
-| `PROMPTFOO_GRADER_MODEL` | backend | โค้ดใช้ `dolphin3` ถ้า**ไม่ได้ตั้ง**; แนะนำ `llama-guard3:1b` |
-| `PROMPTFOO_QUICK_TESTS` | backend | 10 (numTests ต่อ plugin ตอน quick) |
-| `PROMPTFOO_DEEP_TESTS` | backend | 50 (numTests ต่อ plugin ตอน deep) |
+| `PROMPTFOO_GRADER_MODEL` | backend | `qwen2.5:3b` (ต้อง `ollama pull` ก่อน) เปลี่ยนได้ใน `.env` |
+| `PROMPTFOO_QUICK_TESTS` | backend | 10 ในโค้ด (`.env` ตั้ง 3 ให้เร็ว) |
+| `PROMPTFOO_DEEP_TESTS` | backend | 50 ในโค้ด (`.env.example` ตั้ง 15) |
 | `PROMPTFOO_STRATEGIES` | backend | ว่าง = ไม่ใช้ strategy; คอมม่าคั่น เช่น `base64,rot13` (คูณจำนวน test) |
 | `PROMPTFOO_EMAIL` | backend | promptfoo redteam ถามอีเมลครั้งแรก — ต้องตั้ง ไม่งั้นอาจค้างรอ input |
 | `PROMPTFOO_USE_NPX` / `PROMPTFOO_PATH` | backend | ทางเลือกเรียก promptfoo (ไม่ต้องตั้งถ้าติดตั้ง global แล้ว) |
 | `BACKEND_URL` | frontend | `http://backend:8000` ใน compose |
 | `PUBLIC_BACKEND_URL` | frontend | `http://localhost:8000` — URL ที่ **เบราว์เซอร์** เข้าถึง backend ได้ (ใช้กับลิงก์ไฟล์ในรายงาน) ถ้าเปิดจากเครื่องอื่นต้องตั้งเป็น host จริง |
 
-⚠️ **ข้อควรระวัง `PROMPTFOO_GRADER_MODEL` ว่าง**: `docker-compose.yml` ส่งค่าด้วย
-`${PROMPTFOO_GRADER_MODEL:-}` ถ้าไม่ได้ตั้งใน `.env` ตัวแปรจะถูกส่งเข้า container เป็น
-**สตริงว่าง** (ไม่ใช่ "ไม่ได้ตั้ง") ทำให้ `os.environ.get("PROMPTFOO_GRADER_MODEL", "dolphin3")`
-ได้ `""` → `or None` → promptfoo ใช้ **target model ตัดสินผลตัวเอง** ซึ่งขัดกับเจตนาที่แยก
-grader — ต้องตั้งค่าใน `.env` ให้ชัด (เช่น `PROMPTFOO_GRADER_MODEL=llama-guard3:1b`) และ
-`ollama pull` โมเดลนั้นเข้า container ด้วย
+⚠️ **ข้อควรระวัง `PROMPTFOO_GRADER_MODEL` ว่าง**: compose ตั้ง default เป็น
+`${PROMPTFOO_GRADER_MODEL:-qwen2.5:3b}` ดังนั้นถ้าไม่ได้ตั้งอะไรจะใช้ qwen2.5:3b
+ใครอยากเปลี่ยนก็ตั้งใน `.env` ทับ (เช่น `dolphin3`) แล้ว `docker compose up -d`
+แต่ถ้าตั้ง `PROMPTFOO_GRADER_MODEL=` ให้ว่างเอง จะกลายเป็นสตริงว่าง → `or None` →
+ใช้ target model ตัดสินตัวเอง (ไม่แนะนำ) และต้อง `ollama pull` โมเดล grader เสมอ
 
 ## โครงสร้างไฟล์
 
@@ -318,7 +317,7 @@ llm_scanner/
 ├── api/main.py                   # FastAPI: POST /scan (รับ tool_overrides ด้วย),
 │                                  #   GET /scan/{id}/status (progress + elapsed_sec),
 │                                  #   GET /scan/{id}/report, GET /scan/{id}/report/html,
-│                                  #   GET /scan/{id}/files/{filename}
+│                                  #   GET /scan/{id}/report/csv, GET /scan/{id}/files/{filename}
 ├── ui/app.py                     # Streamlit form + dropdown เลือก tool ต่อหมวด + progress % + unified report
 ├── docker-compose.yml            # ollama + backend + frontend (volume: ollama-data, promptfoo-data)
 ├── Dockerfile.backend             # Python 3.11 + Node.js 22 + promptfoo + garak (ต้องมี curl สำหรับ healthcheck)
@@ -375,9 +374,6 @@ llm_scanner/
 - ⚠️ **`PROTOTYPE_CATEGORIES = [LLM01, LLM02, LLM07, LLM10]`** ใน `selector.py`: LLM05/06/09
   ซ่อนจาก UI และค่า default (เพราะยังไม่ผ่านการทดสอบเทียบแบบเป็นระบบ) แต่ยังเรียกผ่าน
   `POST /scan` ได้ตรงๆ เปิดกลับโดยแก้ list นี้บรรทัดเดียว
-- ❌ **`GET /scan/{id}/report/csv` ยังไม่มีใน `api/main.py`** — `ui/app.py` เรียก endpoint
-  นี้เพื่อทำปุ่ม "ดาวน์โหลด CSV (ทุกแถว)" เมื่อไม่มี route จะได้ 404 ปุ่มเลยไม่โผล่
-  (ไม่ error) ไฟล์ `results/<scan_id>/report.csv` ถูกสร้างแล้ว แค่ขาด route คืนไฟล์
 - ❌ **target type "openai_compatible" / "matthew"** — ยังไม่ implement ใน `selector.py`
   จะ raise `NotImplementedError` **บั๊กที่พบเพิ่ม**: `ui/app.py` มีให้เลือก provider
   `"openai_compatible"` แต่ไม่มี input field (`base_url`/`api_key`/`model`) ให้เลย —
@@ -393,7 +389,7 @@ llm_scanner/
 ```bash
 cp .env.example .env          # ตั้ง PROMPTFOO_EMAIL และ PROMPTFOO_GRADER_MODEL ให้ชัด
 docker compose up --build
-docker compose exec ollama ollama pull llama-guard3:1b   # grader (แนะนำ) แล้ว pull โมเดลที่จะสแกนเพิ่ม
+docker compose exec ollama ollama pull qwen2.5:3b   # grader (แนะนำ) แล้ว pull โมเดลที่จะสแกนเพิ่ม
 ```
 
 port 8000 (backend) และ 8501 (frontend) ถูก publish ที่ทุก interface (`"8000:8000"`, `"8501:8501"`)
@@ -452,12 +448,10 @@ python -m core.smoke_test
 ```
 
 ## Next steps
-1. เพิ่ม route `GET /scan/{job_id}/report/csv` ใน `api/main.py` (คืน `results/<scan_id>/report.csv`)
-2. ตั้ง `PROMPTFOO_GRADER_MODEL` ใน `.env` ให้ชัด แล้วรันสแกน quick จริงใน Docker เพื่อเช็ค
-   promptfoo + grader ผ่าน Ollama ใน container
-3. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
-4. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
-5. เติม target type `openai_compatible`/`matthew`
-6. เปลี่ยน job storage จาก in-memory dict เป็น SQLite
-7. ล้าง docstring/comment ที่ยังอ้าง promptmap2 ใน `api/main.py` (docstring หัวไฟล์,
+1. pull grader ที่ตอบ JSON ตาม rubric ได้ (แนะนำ `qwen2.5:3b`) 
+2. เขียน `pyrit_runner.py` ตาม pattern เดียวกับ runner อื่น แล้วเติม `LLM08` เข้าระบบ
+3. เขียน custom assertion ของ Promptfoo สำหรับ LLM05
+4. เติม target type `openai_compatible`/`matthew`
+5. เปลี่ยน job storage จาก in-memory dict เป็น SQLite
+6. ล้าง docstring/comment ที่ยังอ้าง promptmap2 ใน `api/main.py` (docstring หัวไฟล์,
    `TargetConfig`) และ docstring หัวไฟล์ `selector.py` (ส่วน "รอบเจ็ด")

@@ -181,6 +181,7 @@ def _tail(value: str | bytes | None, limit: int = 1500) -> str:
 def _run_command(
     cmd: list[str],
     timeout_sec: int | None,
+    extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """
     เรียก subprocess โดยปิด stdin และ telemetry
@@ -191,6 +192,7 @@ def _run_command(
     env = {
         **os.environ,
         "PROMPTFOO_DISABLE_TELEMETRY": "true",
+        **(extra_env or {}),
     }
     email = os.environ.get("PROMPTFOO_EMAIL")
     # input= ใช้คู่กับ stdin= ไม่ได้ (subprocess จะ raise ValueError)
@@ -232,11 +234,12 @@ def _run_stage(
     log_path: Path,
     stage_name: str,
     allowed_exit_codes: tuple[int, ...] = (0,),
+    extra_env: dict | None = None,
 ) -> subprocess.CompletedProcess:
     """รัน Promptfoo stage และตรวจสอบ exit code ที่อนุญาต."""
 
     try:
-        result = _run_command(cmd, timeout_sec)
+        result = _run_command(cmd, timeout_sec, extra_env=extra_env)
 
     except (RuntimeError, FileNotFoundError) as exc:
         log_path.write_text(
@@ -418,6 +421,7 @@ def run_promptfoo_scan(
         timeout_sec=timeout_sec,
         log_path=generate_log_path,
         stage_name="generate",
+        extra_env={"OLLAMA_BASE_URL": ollama_url},
     )
 
     if not redteam_config_path.is_file():
@@ -456,6 +460,7 @@ def run_promptfoo_scan(
         log_path=eval_log_path,
         stage_name="eval",
         allowed_exit_codes=(0, 100),
+        extra_env={"OLLAMA_BASE_URL": ollama_url},
     )
 
 
@@ -474,7 +479,7 @@ def run_promptfoo_scan(
 
     try:
         with output_path.open("r", encoding="utf-8") as f:
-            json.load(f)
+            data = json.load(f)
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise RuntimeError(
             f"Promptfoo สร้าง JSON ที่อ่านไม่ได้: {output_path}\n"
@@ -482,6 +487,14 @@ def run_promptfoo_scan(
             f"ตรวจสอบ log: {eval_log_path}"
         ) from exc
 
+    stats = (data.get("results") or {}).get("stats") or {}
+    total_stat = sum(stats.get(k, 0) for k in ("successes", "failures", "errors"))
+    if total_stat and stats.get("errors", 0) == total_stat:
+        raise RuntimeError(
+            f"Promptfoo eval error ทุก test ({stats['errors']}/{total_stat}) "
+            f"— เช็ค {eval_log_path} และ URL ของ Ollama ({ollama_url})"
+        )
+    
     if not html_report_path.is_file():
         print(
             "[promptfoo_runner] คำเตือน: ไม่พบ HTML report\n"
